@@ -42,28 +42,21 @@ void Pipsolar::loop() {
     return;
   }
   if (this->state_ == STATE_COMMAND_COMPLETE) {
-    if (this->check_incoming_length_(4)) {
-      if (this->check_incoming_crc_()) {
-        if (this->read_buffer_[1] == 'A' && this->read_buffer_[2] == 'C' && this->read_buffer_[3] == 'K') {
-          ESP_LOGD(TAG, "command successful");
-        } else {
-          ESP_LOGD(TAG, "command not successful");
-        }
-        this->command_queue_[this->command_queue_position_] = std::string("");
-        this->command_queue_position_ = (command_queue_position_ + 1) % COMMAND_QUEUE_LENGTH;
-        this->state_ = STATE_IDLE;
-      } else {
-        this->command_queue_[this->command_queue_position_] = std::string("");
-        this->command_queue_position_ = (command_queue_position_ + 1) % COMMAND_QUEUE_LENGTH;
-        this->state_ = STATE_IDLE;
-      }
-    } else {
-      ESP_LOGD(TAG, "command %s response length not OK: with length %zu",
-               this->command_queue_[this->command_queue_position_].c_str(), this->read_pos_);
-      this->command_queue_[this->command_queue_position_] = std::string("");
-      this->command_queue_position_ = (command_queue_position_ + 1) % COMMAND_QUEUE_LENGTH;
-      this->state_ = STATE_IDLE;
+    const char *command = this->command_queue_[this->command_queue_position_].c_str();
+    switch (this->parse_command_reply_(this->read_buffer_, this->read_pos_)) {
+      case 1:
+        ESP_LOGI(TAG, "command %s accepted", command);
+        break;
+      case 0:
+        ESP_LOGW(TAG, "command %s refused", command);
+        break;
+      default:
+        ESP_LOGW(TAG, "command %s: invalid reply (%zu bytes)", command, this->read_pos_);
+        break;
     }
+    this->command_queue_[this->command_queue_position_] = std::string("");
+    this->command_queue_position_ = (command_queue_position_ + 1) % COMMAND_QUEUE_LENGTH;
+    this->state_ = STATE_IDLE;
   }
 
   if (this->state_ == STATE_POLL_CHECKED) {
@@ -153,11 +146,14 @@ void Pipsolar::loop() {
   }
 }
 
-uint8_t Pipsolar::check_incoming_length_(uint8_t length) {
-  if (this->read_pos_ >= 3 && this->read_pos_ - 3 == length) {
-    return 1;
-  }
-  return 0;
+int8_t Pipsolar::parse_command_reply_(uint8_t *reply, size_t length) {
+  // ^1 (accepted) or ^0 (refused), two CRC bytes, CR
+  if (length != 5 || reply[0] != '^' || (reply[1] != '0' && reply[1] != '1') || reply[4] != 0x0D)
+    return -1;
+  const uint16_t crc = this->pipsolar_crc_(reply, 2);
+  if (reply[2] != (uint8_t) (crc >> 8) || reply[3] != (uint8_t) (crc & 0xff))
+    return -1;
+  return reply[1] == '1' ? 1 : 0;
 }
 
 uint8_t Pipsolar::check_incoming_crc_() {

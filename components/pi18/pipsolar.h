@@ -212,7 +212,8 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   void add_polling_command_(const char *command, ENUMPollingCommand polling_command);
   void empty_uart_buffer_();
   uint8_t check_incoming_crc_();
-  uint8_t check_incoming_length_(uint8_t length);
+  // Reply to a ^S set command: 1 accepted (^1), 0 refused (^0), -1 not a valid reply
+  int8_t parse_command_reply_(uint8_t *reply, size_t length);
   uint16_t pipsolar_crc_(uint8_t *msg, uint8_t len);
   bool send_next_command_();
   bool send_next_poll_();

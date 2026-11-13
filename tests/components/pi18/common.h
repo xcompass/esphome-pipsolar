@@ -13,6 +13,7 @@ class TestablePipsolar : public Pipsolar {
   using Pipsolar::handle_p007pgs0_;
   using Pipsolar::handle_p007piri_;
   using Pipsolar::handle_poll_error_;
+  using Pipsolar::parse_command_reply_;
   using Pipsolar::POLLING_COMMANDS_MAX;
 
   // Registered poll command n as text, or "" when that slot is unused

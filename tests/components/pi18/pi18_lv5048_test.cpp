@@ -678,6 +678,37 @@ TEST(Pi18Lv5048Test, PollCommandsCarryTheirLength) {
   EXPECT_NE(std::find(commands.begin(), commands.end(), "^P006FWS"), commands.end());
 }
 
+// ── Set command replies ───────────────────────────────────────────────────────
+//
+// ^S... set commands are answered with ^1 (accepted) or ^0 (refused), followed
+// by two CRC bytes and CR. Frames from jblance/mpp-solar's ^S007LON test data.
+
+TEST(Pi18Lv5048Test, CommandReplyAccepted) {
+  TestablePipsolar inv;
+  uint8_t reply[] = {'^', '1', 0x0b, 0xc2, '\r'};
+  EXPECT_EQ(inv.parse_command_reply_(reply, sizeof(reply)), 1);
+}
+
+TEST(Pi18Lv5048Test, CommandReplyRefused) {
+  TestablePipsolar inv;
+  uint8_t reply[] = {'^', '0', 0x1b, 0xe3, '\r'};
+  EXPECT_EQ(inv.parse_command_reply_(reply, sizeof(reply)), 0);
+}
+
+TEST(Pi18Lv5048Test, CommandReplyWithBadCrcIsInvalid) {
+  TestablePipsolar inv;
+  uint8_t reply[] = {'^', '1', 0x0b, 0xc3, '\r'};
+  EXPECT_EQ(inv.parse_command_reply_(reply, sizeof(reply)), -1);
+}
+
+TEST(Pi18Lv5048Test, CommandReplyInOtherFormatIsInvalid) {
+  TestablePipsolar inv;
+  uint8_t pi30_ack[] = {'(', 'A', 'C', 'K', 0x39, 0x20, '\r'};
+  uint8_t too_short[] = {'^', '1', '\r'};
+  EXPECT_EQ(inv.parse_command_reply_(pi30_ack, sizeof(pi30_ack)), -1);
+  EXPECT_EQ(inv.parse_command_reply_(too_short, sizeof(too_short)), -1);
+}
+
 // ── Robustness ────────────────────────────────────────────────────────────────
 
 TEST(Pi18Lv5048Test, NullSensorsDoNotCrash) {
