@@ -2,8 +2,8 @@
 
 This describes the PI18 serial protocol the way MPP Solar's own monitoring app,
 SolarPower 1.23SP3, speaks it, with notes for the LV2424. It was recovered by
-decompiling the app's Java classes (static analysis only; nothing from the
-package was run). It shows what the vendor sends and expects. The inverter
+decompiling the app with JADX and Ghidra (static analysis only; nothing from
+the package was run). It shows what the vendor sends and expects. The inverter
 firmware can still refuse a command: an LV2424 answers `^0` to `LON0`, which
 the app offers.
 
@@ -14,7 +14,7 @@ sent in tenths.
 
 | | Format |
 |---|---|
-| Serial | 2400 baud, 8N1 (the app has a 1200-baud fallback) |
+| Serial | 2400 baud, 8N1. Device discovery retries at 9600 baud if nothing answers. |
 | Query | `^P` + length + payload + CRC + CR |
 | Set command | `^S` + length + payload + CRC + CR |
 | Data reply | `^D` + length + data + CRC + CR |
@@ -24,23 +24,47 @@ sent in tenths.
 
 Examples from `docs/pdus/pi18/lv5048.txt`: the `GS` query is `^P005GS` +
 `58 14` + CR, and a `MOD` reply is `^D00503` + `B9 59` + CR (mode 03, battery).
-The app waits up to 3 s for CR and retries up to 3 times on an empty reply or
-NAK.
+
+The app waits up to 3 s for CR and sends each command at most 3 times in
+total. It sends again when the reply is empty, fails the CRC, or is a NAK
+(`^0`); that includes set commands the inverter refused.
 
 ## Model classes
 
-The app picks a class per inverter:
+The app probes PI18 classes in this order and uses the first that matches:
 
-| Class | Match |
+| Class (protocol ID) | Match |
 |---|---|
-| `P181TO2K` ("P1812K") | `PI` starts with `18`, `ID` returns a serial, PIRI field 5 (rated VA) < 3000. The LV2424 (2400 VA) lands here. |
-| `P183TO4K` | same, PIRI field 5 from 3000 to 4999 |
-| `P18` | `GMN` in 0, 2, 4, 6–9, 12, 13, `LST` empty or NAK, PIRI field 5 ≥ 5000 |
+| `P18` ("P18") | `GMN` in 0, 2, 4, 6–9, 12, 13 (a NAK parses as 0), `LST` empty or NAK, `PI` starts with `18`, `ID` returns a serial, PIRI field 5 (rated VA) ≥ 5000 |
+| `P18VII6k` ("P18") | `PI`, `ID`, PIRI field 5 < 3000, except exactly 2000 VA with PIRI field 19 = 0 |
+| `P183TO4K` ("P1834K") | `PI`, `GMN`, `ID`, PIRI field 5 from 3000 to 4999 |
+| `P181TO2K` ("P1812K") | `PI`, `ID`, PIRI field 5 < 3000 (in practice only 2000 VA units with PIRI field 19 = 0 get here) |
 
-For `P1812K` each poll sends `GS`, then `FWS`, `GMN` and `MOD`. It never sends
-the parallel queries (`PRI`, `PGS`, `PS`) or `LOADPR`. Settings are refreshed
-with `FLAG`, `PIRI`, `MCHGCR`, `LST`, `MUCHGCR`, `ACCT`, `ACLT` and `LED`;
-device information with `VFW` and `PIRI`; factory defaults with `DI`.
+**The LV2424:** a unit monitored with this component reports PIRI field 5 =
+3000 VA, field 19 = 9 and field 22 = 0. It therefore matches `P183TO4K`
+("P1834K"), which uses the generic P18 processor and the
+`Events_P181TO2K.xml` fault text.
+
+The app's model number gates many features. `P183TO4K` reads it from `GMN`.
+The two small classes never send `GMN`, so they keep the default model number
+14. The app then treats them as a "V4 WP Plus" model: it polls `HFS00`–`HFS08`
+with every status poll, sends a long list of grid-tie and second-output
+queries, divides GS fields 14 and 15 by 10, and labels flag I "Grid connection
+enabled". This is an app quirk, not inverter behaviour.
+
+## What the app sends
+
+| When | Queries |
+|---|---|
+| Connect | `T`, `VFW`, `PIRI`, then `PIRI`, `MCHGCR`, `LST`, `MUCHGCR`, `ACCT`, `ACLT`, `LED`, then `FLAG`, then `DI`. It also sets the inverter clock to the PC time with `DAT` when AutoTime is on (the default). |
+| Every poll (back to back with a 1 s pause while the device is shown, every 60 s otherwise) | `GS`, `FWS`, `GMN`, `MOD`, `LOADPR`, `VFW`, `PIRI`. If PIRI field 22 (output mode) isn't 0, `PRI`n, `PGS`n and `PS`n for each parallel unit replace `GS`, `MOD` and `LOADPR`. |
+| About every 2.5 s | `FWS` |
+| Every 10 s | Energy history: a background thread refreshes it from a local database, which it fills with `ED`, `EM`, `EY` and `ET` queries |
+| Parameters dialog | `FLAG` and the settings queries again after it closes |
+
+`GS` is dropped when the `FWS` sent with it gets no reply. After three failed
+transactions in a row the app probes with `GS` and eventually closes the
+device.
 
 ## Queries
 
@@ -62,8 +86,8 @@ device information with `VFW` and `PIRI`; factory defaults with `DI`.
 | 11 | Battery charge current | A |
 | 12 | Battery capacity | % |
 | 13 | Heat sink temperature | °C |
-| 14 | MPPT1 charger temperature | °C |
-| 15 | MPPT2 charger temperature | °C |
+| 14 | MPPT1 charger temperature | °C (the app divides by 10 for "V4 WP" models) |
+| 15 | MPPT2 charger temperature | °C (same) |
 | 16 | PV1 input power | W |
 | 17 | PV2 input power | W |
 | 18 | PV1 input voltage | ÷10 V |
@@ -75,7 +99,7 @@ device information with `VFW` and `PIRI`; factory defaults with `DI`.
 | 24 | Battery status (raw code) | |
 | 25 | DC/AC direction; the app shows 0 unless PV1 ≥ 90 V or PV2 > 90 V | |
 | 26 | Line direction | |
-| 27 | Parallel ID | |
+| 27 | Parallel ID; the app uses it as k in `PCP`, `MCHGC` and `MUCHGC` | |
 
 When FWS field 17 is 1 (battery open), the app shows battery voltage, capacity
 and status as 0.
@@ -107,7 +131,7 @@ and status as 0.
 | 20 | Machine type (flag I) | 0 Off-grid, 1 Hybrid |
 | 21 | Topology | 0 Transformerless, 1 Transformer |
 | 22 | Output mode | 0 Single, 1 Parallel, 2–4 three-phase R/S/T, 5–6 split-phase 1/2 |
-| 23 | Solar power priority | 0 Battery-Load-Utility, 1 Load-Battery-Utility |
+| 23 | Solar power priority | 0 Battery-Load-Utility, 1 Load-Battery-Utility (2 Load-Utility-Battery on some models) |
 | 24 | MPPT track count | |
 | 25 | Regulation standard | 00 India, 01 Germany, 02 South America, 03 NRS097, 04 IEC62116 |
 
@@ -136,7 +160,9 @@ and status as 0.
 | 12 | Generator charging enable | M |
 | 14, 15 | Dry contact enable, battery feed into grid | N, O |
 
-Flag I is the machine type (PIRI field 20), not a FLAG field.
+Flag I is the machine type (PIRI field 20), not a FLAG field. The app labels
+it "Model type: Hybrid / Off-grid", or "Grid connection enabled" on V4 WP
+models.
 
 ### `MOD` working mode
 
@@ -155,10 +181,11 @@ Flag I is the machine type (PIRI field 20), not a FLAG field.
 | `MCHGCR` | Every allowed value for the max charging current |
 | `MUCHGCR` | Every allowed value for the max AC charging current |
 | `ET` | Total generated energy (Wh on an LV2424) |
-| `EY`yyyy, `EM`yyyyMM, `ED`yyyyMMdd | Energy for that year, month or day |
+| `EY`yyyy, `EM`yyyyMM, `ED`yyyyMMdd | Energy for that year, month or day, in the same unit as `ET` (the app doesn't scale them) |
 | `T` | Inverter clock, `yyyyMMddHHmmss` |
-| `LST` | LCD sleep time |
-| `ACCT`, `ACLT` | AC charge start and end time; AC output start and end time |
+| `LST` | LCD sleep time: `00` none, `01` 30 s, `02` 60 s, `10` 300 s, `20` 600 s |
+| `ACCT`, `ACLT` | AC charge start and end time; AC output start and end time, each `HHMM` |
+| `LOADPR` | Load 1 VA, load 1 W, load 2 VA, load 2 W (for models with a second output) |
 
 ## Set commands
 
@@ -166,35 +193,46 @@ Payloads follow `^Snnn`. Values marked ×10 are sent in tenths.
 
 | Payload | Effect |
 |---|---|
-| `LON1`, `LON0` | AC output on, off (an LV2424 refuses `LON0`) |
+| `LON1`, `LON0` | AC output on, off. The app never reads the output state back, and an LV2424 refuses `LON0`. |
 | `PE`x, `PD`x | Enable, disable flag x (A–H as in FLAG; I is machine type Hybrid/Off-grid; S is the second AC output) |
 | `POP`n | Output source priority, 0 or 1 |
-| `PSP`n | Solar power priority, 0 or 1 |
-| `PCP`k,n | Charger source priority; k is the parallel index (0 for one unit) |
+| `PSP`n | Solar power priority, 0 or 1 (2 on some models) |
+| `PCP`k,n | Charger source priority; k is GS field 27 (0 for a single unit) |
 | `MCHGC`k,nnn | Max charging current, A |
 | `MUCHGC`k,nnn | Max AC charging current, A |
 | `MCHGV`bbb,fff | Bulk and float voltage ×10, always both |
-| `BUCD`rrr,ddd | Back-to-utility and back-to-battery voltage ×10 |
+| `BUCD`rrr,ddd | Back-to-utility and back-to-battery voltage ×10; the app sends "FULL" as `000` |
 | `PSDV`nnn | Battery cut-off voltage ×10 |
 | `PBT`n | Battery type: 0 AGM, 1 Flooded, 2 User |
 | `PGR`n | Input range: 0 Appliance, 1 UPS |
 | `V`nnnn | Output voltage ×10 |
 | `F`nn | Output frequency, 50 or 60 |
-| `RS`n | Regulation standard |
+| `RS`nn | Regulation standard: `00` India, `01` Germany, `02` South America, `03` NRS097, `04` IEC62116 |
 | `DAT`yyMMddHHmmss | Set the inverter clock |
-| `LST`nn | LCD sleep time |
+| `LST`nn | LCD sleep time, codes as in the `LST` query |
+| `ACCT`hhmm,hhmm, `ACLT`hhmm,hhmm | AC charge window, AC output window |
+| `SBT`n | Li-Fe battery activation enable (1) or disable (0) |
 | `PF` | Restore factory defaults |
 | `CLE` | Clear stored energy data |
 | `BST` | Activate a Li-Fe battery now |
 
-For the 1–2 kW class the app's settings page offers `RS`, `PCP`, `POP`, `PSP`,
-`MCHGC`, `MUCHGC`, `PGR`, `PBT`, `V`, `F` and `BUCD`. For a 24 V battery bank it
-offers back-to-utility 22.0–25.5 V and back-to-battery FULL or 24.0–29.0 V, in
-0.5 V steps. The app knows about 70 more set commands (generator, second
-output, dry contact, LED ring, grid-tie and EN 50549 limits) that it doesn't
-offer to this class.
+For the LV2424's class (`P1834K`) the settings page offers these dropdowns:
+`RS`, `PCP`, `POP`, `PSP`, `MCHGC`, `MUCHGC`, `POPM` (output mode), `PGR`,
+`PBT`, `F`, `V` and `BUCD`. For a 24 V bank, `BUCD` offers back-to-utility
+22.0–25.5 V and back-to-battery FULL or 24.0–29.0 V, in 0.5 V steps.
 
-## Fault text for the 1–2 kW class
+The same page also offers:
+- the `PE`/`PD` flags;
+- `SBT`;
+- `MCHGV` and `PSDV` spinners (for a 24 V bank: bulk and float 24.0–29.2 V,
+  cut-off 20.4–24.0 V);
+- the `ACCT` and `ACLT` time windows;
+- the clock.
+
+The app knows about 70 more set commands (generator, second output, dry
+contact, LED ring, grid-tie and EN 50549 limits) for other models.
+
+## Fault text for the 1–4 kW classes
 
 | Code | Fault | Code | Fault |
 |---|---|---|---|
@@ -211,8 +249,9 @@ offer to this class.
 | 11 | PV voltage over | 72 | Output circuit failed |
 | 12 | Charge current over | 80–86 | Parallel faults |
 
-Codes 10–12 differ from the app's generic P18 table, where 11 is "Main relay
-failed".
+`P1812K` and `P1834K` both use this table (`Events_P181TO2K.xml`). Codes
+10–12 differ from the generic P18 table, where 11 is "Main relay failed".
+The app expects a two-digit code, and never raises 52 although it has text.
 
 ## Not implemented by this component
 
@@ -226,8 +265,10 @@ fault code text, and the set commands from `BUCD` down in the table above.
   The protocol code is in `lib/SolarPower.jar`, under
   `cn.com.voltronic.solar.{protocol,comusbprocessor,control,communicate}`.
   The fault text is in `config/Events_P181TO2K.xml`.
-- **Method:** the classes were decompiled with Ghidra 12.2 (headless, JVM loader).
-- **Not decompiled:** the shared base processor, the model helper class and the
-  scheduler. Poll intervals, the energy-value scaling and some model gates are
-  therefore inferred.
+- **Method:** the classes were decompiled with JADX 1.5.6, after a first pass with Ghidra 12.2.
+- **App quirks:** the app's handling of the small classes has bugs (the
+  model-14 default above), so it isn't a perfect record of what it would put on
+  the wire. Treat it as the vendor's intent.
+- **Unverified on an LV2424:** the model number `GMN` returns, so whether the
+  "V4 WP" gates apply.
 - **Missing labels:** the app has no names for GS fields 21, 22, 24 and 25.
