@@ -38,7 +38,6 @@ TYPES = {
     CONF_BACKLIGHT_ON: ("^S006PEF", "^S006PDF"),
     CONF_ALARM_ON_WHEN_PRIMARY_SOURCE_INTERRUPT: ("^S006PEG", "^S006PDG"),
     CONF_FAULT_CODE_RECORD: ("^S006PEH", "^S006PDH"),
-    CONF_POWER_SAVING: ("^S006PEI", "^S006PDI"),
 }
 
 PipsolarSwitch = pipsolar_ns.class_("PipsolarSwitch", switch.Switch, cg.Component)
@@ -47,9 +46,17 @@ PIPSWITCH_SCHEMA = switch.switch_schema(
     PipsolarSwitch, icon=ICON_POWER, block_inverted=True
 ).extend(cv.COMPONENT_SCHEMA)
 
+# ^S006PEI/PDI isn't power saving: MPP Solar's SolarPower uses flag I for the machine
+# type (Hybrid/Off-grid, PIRI field 20), and never reads FLAG field 8.
+POWER_SAVING_REMOVED = (
+    "The pi18 power_saving switch was removed: its command (^S006PEI/PDI) sets the "
+    "machine type (Hybrid/Off-grid) in MPP Solar's SolarPower, not power saving. "
+    "Use the machine_type select if you need to change it."
+)
+
 CONFIG_SCHEMA = PIPSOLAR_COMPONENT_SCHEMA.extend(
     {cv.Optional(type): PIPSWITCH_SCHEMA for type in TYPES}
-)
+).extend({cv.Optional(CONF_POWER_SAVING): cv.invalid(POWER_SAVING_REMOVED)})
 
 
 async def to_code(config):

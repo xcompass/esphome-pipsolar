@@ -92,7 +92,8 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   PIPSOLAR_TEXT_SENSOR(dc_ac_power_direction, P005GS)
   PIPSOLAR_TEXT_SENSOR(line_power_direction, P005GS)
 
-  // ^P007PIRI — device ratings (25 fields, ×0.1 for voltages/currents/frequencies)
+  // ^P007PIRI — device ratings (26 fields, ×0.1 for voltages/currents/frequencies;
+  // field 25, the grid regulation standard, isn't parsed)
   PIPSOLAR_SENSOR(grid_rating_voltage, P007PIRI)
   PIPSOLAR_SENSOR(grid_rating_current, P007PIRI)
   PIPSOLAR_SENSOR(ac_output_rating_voltage, P007PIRI)
@@ -132,6 +133,8 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   PIPSOLAR_BINARY_SENSOR(backlight_on, P007FLAG)
   PIPSOLAR_BINARY_SENSOR(alarm_on_when_primary_source_interrupt, P007FLAG)
   PIPSOLAR_BINARY_SENSOR(fault_code_record, P007FLAG)
+  // Field 8. SolarPower doesn't read it, so its meaning is unconfirmed; the
+  // ^S006PEI/PDI command is the machine type setting, not power saving.
   PIPSOLAR_BINARY_SENSOR(power_saving, P007FLAG)
 
   // ^P006FWS — fault/warning status
@@ -152,6 +155,7 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   PIPSOLAR_BINARY_SENSOR(warning_mppt2_overload, P006FWS)
   PIPSOLAR_BINARY_SENSOR(warning_scc1_battery_too_low_to_charge, P006FWS)
   PIPSOLAR_BINARY_SENSOR(warning_scc2_battery_too_low_to_charge, P006FWS)
+  PIPSOLAR_BINARY_SENSOR(warning_battery_open, P006FWS)
 
   // ^P005ET — total generated energy (8-digit, kWh)
   PIPSOLAR_SENSOR(total_generated_energy, P005ET)
@@ -195,9 +199,19 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   PIPSOLAR_SWITCH(backlight_on_switch, P007FLAG)
   PIPSOLAR_SWITCH(alarm_on_when_primary_source_interrupt_switch, P007FLAG)
   PIPSOLAR_SWITCH(fault_code_record_switch, P007FLAG)
-  PIPSOLAR_SWITCH(power_saving_switch, P007FLAG)
 
   void queue_command(const std::string &command);
+
+  // Bulk and float charge voltages (V) from the last PIRI reply or charge voltage
+  // write; empty until the first PIRI reply.
+  esphome::optional<float> get_battery_bulk_voltage_setting() const { return this->battery_bulk_voltage_setting_; }
+  esphome::optional<float> get_battery_float_voltage_setting() const { return this->battery_float_voltage_setting_; }
+  // Queues ^S015MCHGV, which always sets both voltages. Returns false, and queues
+  // nothing, when a voltage is outside 0.1-99.9 V.
+  bool set_charge_voltages(float bulk_voltage, float float_voltage);
+  // "^S015MCHGV<bulk>,<float>" in 0.1 V with three digits each, or "" if a value doesn't fit
+  static std::string charge_voltage_command(float bulk_voltage, float float_voltage);
+
   void setup() override;
   void loop() override;
   void dump_config() override;
@@ -245,6 +259,9 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   // Missing field -> empty optional; otherwise non-zero -> true
   esphome::optional<bool> read_flag_(const char *message, size_t *pos);
   void read_sensor_(const char *message, size_t *pos, sensor::Sensor *sensor, float scale = 1.0f);
+
+  esphome::optional<float> battery_bulk_voltage_setting_;
+  esphome::optional<float> battery_float_voltage_setting_;
 
   std::string command_queue_[COMMAND_QUEUE_LENGTH];
   uint8_t command_queue_position_ = 0;

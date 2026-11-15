@@ -170,6 +170,19 @@ static const char LV5048_P009MCHGCR[] = "^D050010,020,030,040,050,060,070,080,09
 // w[0..4]: line_fail, output_short, over_temp, fan_lock, bat_voltage_high.
 static const char LV5048_P006FWS_MULTI_FAULT[] = "^D03905,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0";
 
+// Not captured frames: the last field (index 17) is "battery connection is open",
+// and the second reply comes from firmware that omits it.
+static const char LV5048_P006FWS_BATTERY_OPEN[] = "^D03900,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1";
+static const char LV5048_P006FWS_WITHOUT_BATTERY_OPEN[] = "^D03700,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0";
+
+// ── ^P006MOD (synthetic test vectors) ────────────────────────────────────────
+//
+// Mode codes SolarPower names but no capture covers: 00 power on, 06 charge.
+// 07 is reported by an LV2424 just before it powers off and has no name.
+static const char LV5048_P006MOD_POWER_ON[] = "^D00500";
+static const char LV5048_P006MOD_CHARGE[] = "^D00506";
+static const char LV5048_P006MOD_UNNAMED[] = "^D00507";
+
 // ── Unsupported-command responses ─────────────────────────────────────────────
 //
 // Commands not implemented by this firmware return a non-standard NAK:

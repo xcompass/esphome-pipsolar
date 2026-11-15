@@ -301,9 +301,10 @@ class TestPi18BinarySensorTypes:
         assert pi18_bs.CONF_WARNING_MPPT2_OVERLOAD in pi18_bs.TYPES
         assert pi18_bs.CONF_WARNING_SCC1_BATTERY_TOO_LOW_TO_CHARGE in pi18_bs.TYPES
         assert pi18_bs.CONF_WARNING_SCC2_BATTERY_TOO_LOW_TO_CHARGE in pi18_bs.TYPES
+        assert pi18_bs.CONF_WARNING_BATTERY_OPEN in pi18_bs.TYPES
 
     def test_binary_sensor_types_count(self):
-        assert len(pi18_bs.TYPES) == 26
+        assert len(pi18_bs.TYPES) == 27
 
     def test_binary_sensor_values_unique(self):
         assert len(pi18_bs.TYPES) == len(set(pi18_bs.TYPES))
@@ -334,3 +335,53 @@ class TestPi18TextSensorTypes:
 
     def test_text_sensor_values_unique(self):
         assert len(pi18_ts.TYPES) == len(set(pi18_ts.TYPES))
+
+
+# ── pi18 switches and outputs ─────────────────────────────────────────────────
+
+import re  # noqa: E402
+
+import esphome.config_validation as cv  # noqa: E402
+import pytest  # noqa: E402
+
+from components.pi18 import output as pi18_output, switch as pi18_switch  # noqa: E402
+from components.pi18.const import (  # noqa: E402
+    CONF_BATTERY_BULK_VOLTAGE,
+    CONF_BATTERY_FLOAT_VOLTAGE,
+    CONF_POWER_SAVING,
+)
+
+
+def _schema_validator(schema, key):
+    return next(value for marker, value in schema.schema.items() if str(marker) == key)
+
+
+class TestPi18SwitchTypes:
+    def test_power_saving_switch_removed(self):
+        # ^S006PEI/PDI is the machine type setting (Hybrid/Off-grid) in SolarPower
+        assert CONF_POWER_SAVING not in pi18_switch.TYPES
+
+    def test_power_saving_switch_config_explains_why(self):
+        validator = _schema_validator(pi18_switch.CONFIG_SCHEMA, CONF_POWER_SAVING)
+        with pytest.raises(cv.Invalid, match="machine type"):
+            validator({})
+
+
+class TestPi18OutputTypes:
+    def test_command_templates_format_the_float_level(self):
+        # The level is a float; a %d conversion would read the wrong argument
+        for values, command in pi18_output.TYPES.values():
+            if command is None:
+                continue
+            assert re.findall(r"%[-+ 0#]*\d*(?:\.\d+)?([a-zA-Z])", command) == ["f"]
+            sent = command % values[-1]
+            assert int(sent[2:5]) == len(sent) - 5 + 3
+
+    def test_charge_voltages_are_sent_by_the_component(self):
+        # ^S015MCHGV always carries both voltages, so it has no single-value template
+        assert set(pi18_output.CHARGE_VOLTAGES) == {
+            CONF_BATTERY_BULK_VOLTAGE,
+            CONF_BATTERY_FLOAT_VOLTAGE,
+        }
+        for key in pi18_output.CHARGE_VOLTAGES:
+            assert pi18_output.TYPES[key][1] is None

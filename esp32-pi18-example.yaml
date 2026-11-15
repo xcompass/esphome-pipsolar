@@ -257,6 +257,8 @@ binary_sensor:
       name: "warning scc1 battery too low to charge"
     warning_scc2_battery_too_low_to_charge:
       name: "warning scc2 battery too low to charge"
+    warning_battery_open:
+      name: "warning battery open"
 
 select:
   - platform: pi18
@@ -433,5 +435,3 @@ switch:
       name: "alarm on primary source interrupt"
     fault_code_record:
       name: "fault code record"
-    power_saving:
-      name: "power saving"

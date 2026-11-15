@@ -21,6 +21,9 @@ class TestablePipsolar : public Pipsolar {
     const auto &entry = this->enabled_polling_commands_[n];
     return entry.length == 0 ? std::string() : std::string((const char *) entry.command, entry.length);
   }
+
+  // The command queue holds at most one entry per test; returns "" when empty
+  const std::string &queued_command() const { return this->command_queue_[0]; }
 };
 
 // switch_::Switch is abstract; tests only need publish_state()

@@ -363,6 +363,37 @@ TEST(Pi18Lv5048Test, P006modHybridMode) {
   EXPECT_EQ(mode_id.state, 5);
 }
 
+TEST(Pi18Lv5048Test, P006modPowerOnMode) {
+  TestablePipsolar inv;
+  text_sensor::TextSensor mode;
+  sensor::Sensor mode_id;
+  inv.set_device_mode(&mode);
+  inv.set_device_mode_id(&mode_id);
+  inv.handle_p006mod_(LV5048_P006MOD_POWER_ON);
+  EXPECT_STREQ(mode.state.c_str(), "Power on mode");
+  EXPECT_EQ(mode_id.state, 0);
+}
+
+TEST(Pi18Lv5048Test, P006modChargeMode) {
+  TestablePipsolar inv;
+  text_sensor::TextSensor mode;
+  inv.set_device_mode(&mode);
+  inv.handle_p006mod_(LV5048_P006MOD_CHARGE);
+  EXPECT_STREQ(mode.state.c_str(), "Charge mode");
+}
+
+TEST(Pi18Lv5048Test, P006modUnnamedModeDoesNotKeepThePreviousName) {
+  TestablePipsolar inv;
+  text_sensor::TextSensor mode;
+  sensor::Sensor mode_id;
+  inv.set_device_mode(&mode);
+  inv.set_device_mode_id(&mode_id);
+  inv.handle_p006mod_(LV5048_P006MOD_BATTERY);
+  inv.handle_p006mod_(LV5048_P006MOD_UNNAMED);
+  EXPECT_STREQ(mode.state.c_str(), "Unknown mode");
+  EXPECT_EQ(mode_id.state, 7);
+}
+
 // ── P007FLAG ──────────────────────────────────────────────────────────────────
 
 TEST(Pi18Lv5048Test, P007flagEnabledFlags) {
@@ -477,6 +508,27 @@ TEST(Pi18Lv5048Test, P006fwsMultiFaultWarningsTrue) {
   EXPECT_FALSE(bat_low.state);
   EXPECT_FALSE(bat_shutdown.state);
   EXPECT_FALSE(overload.state);
+}
+
+TEST(Pi18Lv5048Test, P006fwsBatteryOpenWarning) {
+  TestablePipsolar inv;
+  binary_sensor::BinarySensor battery_open, scc2_low;
+  inv.set_warning_battery_open(&battery_open);
+  inv.set_warning_scc2_battery_too_low_to_charge(&scc2_low);
+  inv.handle_p006fws_(LV5048_P006FWS_BATTERY_OPEN);
+  EXPECT_TRUE(battery_open.state);
+  EXPECT_FALSE(scc2_low.state);
+  inv.handle_p006fws_(LV5048_P006FWS_EEPROM_WARN);
+  EXPECT_FALSE(battery_open.state);
+}
+
+TEST(Pi18Lv5048Test, P006fwsBatteryOpenUnknownWhenFieldMissing) {
+  TestablePipsolar inv;
+  binary_sensor::BinarySensor battery_open;
+  inv.set_warning_battery_open(&battery_open);
+  inv.handle_p006fws_(LV5048_P006FWS_BATTERY_OPEN);
+  inv.handle_p006fws_(LV5048_P006FWS_WITHOUT_BATTERY_OPEN);
+  EXPECT_FALSE(battery_open.has_state());
 }
 
 // ── P005ET ────────────────────────────────────────────────────────────────────
@@ -707,6 +759,46 @@ TEST(Pi18Lv5048Test, CommandReplyInOtherFormatIsInvalid) {
   uint8_t too_short[] = {'^', '1', '\r'};
   EXPECT_EQ(inv.parse_command_reply_(pi30_ack, sizeof(pi30_ack)), -1);
   EXPECT_EQ(inv.parse_command_reply_(too_short, sizeof(too_short)), -1);
+}
+
+// ── Charge voltages (^S015MCHGV) ──────────────────────────────────────────────
+//
+// SolarPower sends MCHGV<bulk>,<float> as two 3-digit values in 0.1 V, always both.
+
+TEST(Pi18Lv5048Test, ChargeVoltageCommandUsesTenthsOfAVolt) {
+  EXPECT_EQ(Pipsolar::charge_voltage_command(28.8f, 27.6f), "^S015MCHGV288,276");
+  EXPECT_EQ(Pipsolar::charge_voltage_command(55.4f, 54.0f), "^S015MCHGV554,540");
+}
+
+TEST(Pi18Lv5048Test, ChargeVoltageCommandRejectsValuesOutsideThreeDigits) {
+  EXPECT_EQ(Pipsolar::charge_voltage_command(100.0f, 54.0f), "");
+  EXPECT_EQ(Pipsolar::charge_voltage_command(55.4f, 0.0f), "");
+  EXPECT_EQ(Pipsolar::charge_voltage_command(NAN, 54.0f), "");
+}
+
+TEST(Pi18Lv5048Test, P007piriRemembersChargeVoltagesWithoutSensors) {
+  TestablePipsolar inv;
+  EXPECT_FALSE(inv.get_battery_bulk_voltage_setting().has_value());
+  inv.handle_p007piri_(LV5048_P007PIRI_BANANNAJOE);
+  ASSERT_TRUE(inv.get_battery_bulk_voltage_setting().has_value());
+  ASSERT_TRUE(inv.get_battery_float_voltage_setting().has_value());
+  EXPECT_NEAR(*inv.get_battery_bulk_voltage_setting(), 55.4f, 0.01f);
+  EXPECT_NEAR(*inv.get_battery_float_voltage_setting(), 54.0f, 0.01f);
+}
+
+TEST(Pi18Lv5048Test, SetChargeVoltagesQueuesBothAndRemembersThem) {
+  TestablePipsolar inv;
+  EXPECT_TRUE(inv.set_charge_voltages(28.8f, 27.6f));
+  EXPECT_EQ(inv.queued_command(), "^S015MCHGV288,276");
+  EXPECT_NEAR(*inv.get_battery_bulk_voltage_setting(), 28.8f, 0.01f);
+  EXPECT_NEAR(*inv.get_battery_float_voltage_setting(), 27.6f, 0.01f);
+}
+
+TEST(Pi18Lv5048Test, SetChargeVoltagesRefusesValuesItCannotEncode) {
+  TestablePipsolar inv;
+  EXPECT_FALSE(inv.set_charge_voltages(100.0f, 27.6f));
+  EXPECT_EQ(inv.queued_command(), "");
+  EXPECT_FALSE(inv.get_battery_bulk_voltage_setting().has_value());
 }
 
 // ── Robustness ────────────────────────────────────────────────────────────────

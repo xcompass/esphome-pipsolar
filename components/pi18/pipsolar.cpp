@@ -3,6 +3,8 @@
 #include "esphome/core/log.h"
 #include "pipsolar_select.h"
 
+#include <cmath>
+
 // Fallback for ESPHome < 2026.10.0
 #ifndef ESPHOME_LOG_TAG
 #define ESPHOME_LOG_TAG(name, tag) static const char *const name = tag
@@ -245,6 +247,31 @@ void Pipsolar::queue_command(const std::string &command) {
   ESP_LOGD(TAG, "Command queue full dropping command: %s", command.c_str());
 }
 
+std::string Pipsolar::charge_voltage_command(float bulk_voltage, float float_voltage) {
+  if (!std::isfinite(bulk_voltage) || !std::isfinite(float_voltage))
+    return "";
+  const float bulk_tenths = std::round(bulk_voltage * 10.0f);
+  const float float_tenths = std::round(float_voltage * 10.0f);
+  // The length field (015) assumes exactly three digits per value
+  if (bulk_tenths < 1.0f || bulk_tenths > 999.0f || float_tenths < 1.0f || float_tenths > 999.0f)
+    return "";
+  char command[24];
+  snprintf(command, sizeof(command), "^S015MCHGV%03d,%03d", static_cast<int>(bulk_tenths),
+           static_cast<int>(float_tenths));
+  return command;
+}
+
+bool Pipsolar::set_charge_voltages(float bulk_voltage, float float_voltage) {
+  const std::string command = charge_voltage_command(bulk_voltage, float_voltage);
+  if (command.empty())
+    return false;
+  this->queue_command(command);
+  // Assume the write succeeds; the next PIRI reply corrects this if the inverter refused it
+  this->battery_bulk_voltage_setting_ = bulk_voltage;
+  this->battery_float_voltage_setting_ = float_voltage;
+  return true;
+}
+
 void Pipsolar::handle_poll_response_(ENUMPollingCommand polling_command, const char *message) {
   switch (polling_command) {
     case POLLING_P007PIRI:
@@ -378,8 +405,15 @@ void Pipsolar::handle_p007piri_(const char *message) {
   const auto bat_under_v_raw = this->read_int_(message, &pos);
   this->publish_sensor_(this->battery_under_voltage_, bat_under_v_raw, 0.1f);
 
-  read_sensor_(message, &pos, this->battery_bulk_voltage_, 0.1f);
-  read_sensor_(message, &pos, this->battery_float_voltage_, 0.1f);
+  // Kept even without sensors: ^S015MCHGV sets both voltages, so changing one resends the other
+  const auto bulk_v_raw = this->read_int_(message, &pos);
+  this->publish_sensor_(this->battery_bulk_voltage_, bulk_v_raw, 0.1f);
+  const auto float_v_raw = this->read_int_(message, &pos);
+  this->publish_sensor_(this->battery_float_voltage_, float_v_raw, 0.1f);
+  if (bulk_v_raw.has_value() && float_v_raw.has_value()) {
+    this->battery_bulk_voltage_setting_ = *bulk_v_raw * 0.1f;
+    this->battery_float_voltage_setting_ = *float_v_raw * 0.1f;
+  }
 
   const auto bat_type = this->read_int_(message, &pos);
   const auto max_ac_charging_i = this->read_int_(message, &pos);
@@ -437,8 +471,13 @@ void Pipsolar::handle_p006mod_(const char *message) {
   if (this->device_mode_id_)
     this->device_mode_id_->publish_state(mode_id);
   if (this->device_mode_) {
+    // Names for 0-6 follow MPP Solar's SolarPower. An LV2424 reports 7 just before it
+    // powers off; publishing "Unknown mode" keeps the sensor from showing the previous mode.
     const char *name;
     switch (mode_char) {
+      case '0':
+        name = "Power on mode";
+        break;
       case '1':
         name = "Standby mode";
         break;
@@ -454,12 +493,14 @@ void Pipsolar::handle_p006mod_(const char *message) {
       case '5':
         name = "Hybrid mode";
         break;
+      case '6':
+        name = "Charge mode";
+        break;
       default:
-        name = nullptr;
+        name = "Unknown mode";
         break;
     }
-    if (name)
-      this->device_mode_->publish_state(name);
+    this->device_mode_->publish_state(name);
   }
 }
 
@@ -521,6 +562,10 @@ void Pipsolar::handle_p006fws_(const char *message) {
   // Firmwares that report fewer warnings leave the remaining sensors unknown instead of off
   for (auto *sensor : warn_sensors)
     this->publish_binary_sensor_(this->read_flag_(message, &pos), sensor);
+
+  // Field 17: battery connection is open (SolarPower code 1056). Firmware that sends
+  // only 17 fields leaves the sensor unknown.
+  this->publish_binary_sensor_(this->read_flag_(message, &pos), this->warning_battery_open_);
 }
 
 void Pipsolar::handle_p005et_(const char *message) {

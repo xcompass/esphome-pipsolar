@@ -39,6 +39,8 @@ CONF_WARNING_MPPT1_OVERLOAD = "warning_mppt1_overload"
 CONF_WARNING_MPPT2_OVERLOAD = "warning_mppt2_overload"
 CONF_WARNING_SCC1_BATTERY_TOO_LOW_TO_CHARGE = "warning_scc1_battery_too_low_to_charge"
 CONF_WARNING_SCC2_BATTERY_TOO_LOW_TO_CHARGE = "warning_scc2_battery_too_low_to_charge"
+# FWS field 17, "battery connection is open" in SolarPower
+CONF_WARNING_BATTERY_OPEN = "warning_battery_open"
 
 TYPES = [
     CONF_SETTING_VALUE_CONFIGURATION_STATE,
@@ -67,6 +69,7 @@ TYPES = [
     CONF_WARNING_MPPT2_OVERLOAD,
     CONF_WARNING_SCC1_BATTERY_TOO_LOW_TO_CHARGE,
     CONF_WARNING_SCC2_BATTERY_TOO_LOW_TO_CHARGE,
+    CONF_WARNING_BATTERY_OPEN,
 ]
 
 CONFIG_SCHEMA = PIPSOLAR_COMPONENT_SCHEMA.extend(
