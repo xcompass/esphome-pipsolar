@@ -28,6 +28,7 @@ struct PollingCommand {
   uint8_t *command;
   uint8_t length = 0;
   uint8_t errors;
+  uint8_t refusals = 0;  // ^0 replies since the last update or answer
   ENUMPollingCommand identifier;
   bool needs_update;
 };
@@ -171,6 +172,7 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   PIPSOLAR_TEXT_SENSOR(last_p007piri, P007PIRI)
   PIPSOLAR_TEXT_SENSOR(last_p006mod, P006MOD)
   PIPSOLAR_TEXT_SENSOR(last_p007flag, P007FLAG)
+  PIPSOLAR_TEXT_SENSOR(fault_description, P006FWS)
   // The YAML key keeps its old name so existing configs still validate
   PIPSOLAR_TEXT_SENSOR(last_p005fws, P006FWS)
   PIPSOLAR_TEXT_SENSOR(last_p005et, P005ET)
@@ -222,6 +224,8 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   static const size_t COMMAND_QUEUE_LENGTH = 10;
   static const size_t COMMAND_TIMEOUT = 5000;
   static const size_t POLLING_COMMANDS_MAX = 10;
+  // Like SolarPower, a poll the inverter refuses is tried at most this often per update
+  static const uint8_t POLL_ATTEMPTS_MAX = 3;
 
   void add_polling_command_(const char *command, ENUMPollingCommand polling_command);
   void empty_uart_buffer_();
@@ -239,6 +243,7 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   void handle_p006mod_(const char *message);
   void handle_p007flag_(const char *message);
   void handle_p006fws_(const char *message);
+  void publish_fault_description_(int fault_code);
   void handle_p005et_(const char *message);
   void handle_p007pgs0_(const char *message);
 

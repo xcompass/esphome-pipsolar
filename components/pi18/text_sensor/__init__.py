@@ -17,6 +17,9 @@ CONF_LINE_POWER_DIRECTION = "line_power_direction"
 # P006MOD text sensor
 CONF_DEVICE_MODE = "device_mode"
 
+# P006FWS text sensor
+CONF_FAULT_DESCRIPTION = "fault_description"
+
 # Raw response text sensors
 CONF_LAST_P005GS = "last_p005gs"
 CONF_LAST_P007PIRI = "last_p007piri"
@@ -33,6 +36,7 @@ TYPES = [
     CONF_DC_AC_POWER_DIRECTION,
     CONF_LINE_POWER_DIRECTION,
     CONF_DEVICE_MODE,
+    CONF_FAULT_DESCRIPTION,
     CONF_LAST_P005GS,
     CONF_LAST_P007PIRI,
     CONF_LAST_P006MOD,

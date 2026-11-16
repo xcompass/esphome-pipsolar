@@ -571,6 +571,41 @@ TEST(Pi18Lv5048Test, P007pgs0TotalLoadAndChargingCurrent) {
   EXPECT_FLOAT_EQ(chg_a.state, 337.0f);
 }
 
+// Fault text from SolarPower's tables (Events_P181TO2K.xml, Events_P18.xml)
+
+TEST(Pi18Lv5048Test, P006fwsFaultDescriptionNoFault) {
+  TestablePipsolar inv;
+  text_sensor::TextSensor description;
+  inv.set_fault_description(&description);
+  inv.handle_p006fws_(LV5048_P006FWS_EEPROM_WARN);
+  EXPECT_EQ(description.state, "No fault");
+}
+
+TEST(Pi18Lv5048Test, P006fwsFaultDescriptionNamesTheFault) {
+  TestablePipsolar inv;
+  text_sensor::TextSensor description;
+  inv.set_fault_description(&description);
+  inv.handle_p006fws_(LV5048_P006FWS_MULTI_FAULT);
+  EXPECT_EQ(description.state, "Output short circuited or over temperature");
+}
+
+// 11 is "PV voltage over" for 1-4 kW units and "Main relay failed" for the others
+TEST(Pi18Lv5048Test, P006fwsFaultDescriptionGivesBothMeaningsOf11) {
+  TestablePipsolar inv;
+  text_sensor::TextSensor description;
+  inv.set_fault_description(&description);
+  inv.handle_p006fws_(LV5048_P006FWS_FAULT_11);
+  EXPECT_EQ(description.state, "PV voltage over or main relay failed");
+}
+
+TEST(Pi18Lv5048Test, P006fwsFaultDescriptionShowsUnnamedCodes) {
+  TestablePipsolar inv;
+  text_sensor::TextSensor description;
+  inv.set_fault_description(&description);
+  inv.handle_p006fws_(LV5048_P006FWS_UNNAMED_FAULT);
+  EXPECT_EQ(description.state, "Unknown fault 13");
+}
+
 // ── Poll errors (timeout, NAK, CRC mismatch) ──────────────────────────────────
 //
 // A failed poll is decoded as an empty message. Missing fields must not be
@@ -700,6 +735,15 @@ TEST(Pi18Lv5048Test, P006fwsMissingFaultCodeIsNotZero) {
   EXPECT_TRUE(std::isnan(fault_code.state));
 }
 
+TEST(Pi18Lv5048Test, P006fwsMissingFaultCodeKeepsDescription) {
+  TestablePipsolar inv;
+  text_sensor::TextSensor description;
+  inv.set_fault_description(&description);
+  inv.handle_p006fws_(LV5048_P006FWS_MULTI_FAULT);
+  inv.handle_p006fws_("^D003,");
+  EXPECT_EQ(description.state, "Output short circuited or over temperature");
+}
+
 // ── Poll commands ─────────────────────────────────────────────────────────────
 
 // The 3-digit length counts the payload plus 2 CRC bytes and the CR. SolarPower
@@ -728,6 +772,65 @@ TEST(Pi18Lv5048Test, PollCommandsCarryTheirLength) {
   }
   EXPECT_EQ(commands.size(), 7u);
   EXPECT_NE(std::find(commands.begin(), commands.end(), "^P006FWS"), commands.end());
+}
+
+// ── Poll replies over UART ────────────────────────────────────────────────────
+//
+// A MOD reply (mode 03, battery) and a refusal, each followed by CRC and CR
+
+static const std::vector<uint8_t> MOD_REPLY_BATTERY = {'^', 'D', '0', '0', '5', '0', '3', 0xb9, 0x59, '\r'};
+static const std::vector<uint8_t> REFUSED_REPLY = {'^', '0', 0x1b, 0xe3, '\r'};
+
+TEST(Pi18Lv5048Test, AnsweredPollIsDecoded) {
+  FakeUart uart;
+  TestablePipsolar inv;
+  inv.set_uart_parent(&uart);
+  sensor::Sensor mode_id;
+  inv.set_device_mode_id(&mode_id);
+  inv.loop();  // sends ^P006MOD
+  uart.receive(MOD_REPLY_BATTERY);
+  for (int i = 0; i < 4; i++)
+    inv.loop();
+  EXPECT_FLOAT_EQ(mode_id.state, 3.0f);
+  EXPECT_EQ(uart.count_sent("^P006MOD"), 1u);
+}
+
+// An inverter answers a query it doesn't support with ^0. That is a refusal, not
+// data. Like SolarPower, the component tries a refused poll at most 3 times per update.
+TEST(Pi18Lv5048Test, PollAnsweredAfterARefusalIsDecoded) {
+  FakeUart uart;
+  TestablePipsolar inv;
+  inv.set_uart_parent(&uart);
+  sensor::Sensor mode_id;
+  inv.set_device_mode_id(&mode_id);
+  inv.loop();  // sends ^P006MOD
+  uart.receive(REFUSED_REPLY);
+  for (int i = 0; i < 4; i++)
+    inv.loop();
+  EXPECT_FALSE(mode_id.has_state());
+  uart.receive(MOD_REPLY_BATTERY);
+  for (int i = 0; i < 4; i++)
+    inv.loop();
+  EXPECT_FLOAT_EQ(mode_id.state, 3.0f);
+  EXPECT_EQ(uart.count_sent("^P006MOD"), 2u);
+}
+
+TEST(Pi18Lv5048Test, RefusedPollIsTriedThreeTimesPerUpdate) {
+  FakeUart uart;
+  TestablePipsolar inv;
+  inv.set_uart_parent(&uart);
+  sensor::Sensor mode_id;
+  inv.set_device_mode_id(&mode_id);
+  inv.loop();  // sends ^P006MOD
+  for (int attempt = 0; attempt < 5; attempt++) {
+    uart.receive(REFUSED_REPLY);
+    for (int i = 0; i < 4; i++)
+      inv.loop();
+  }
+  EXPECT_EQ(uart.count_sent("^P006MOD"), 3u);
+  inv.update();
+  inv.loop();
+  EXPECT_EQ(uart.count_sent("^P006MOD"), 4u);
 }
 
 // ── Set command replies ───────────────────────────────────────────────────────

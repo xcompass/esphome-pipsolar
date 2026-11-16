@@ -170,6 +170,11 @@ static const char LV5048_P009MCHGCR[] = "^D050010,020,030,040,050,060,070,080,09
 // w[0..4]: line_fail, output_short, over_temp, fan_lock, bat_voltage_high.
 static const char LV5048_P006FWS_MULTI_FAULT[] = "^D03905,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0";
 
+// Not captured frames: fault 11, which SolarPower names differently by model
+// class, and fault 13, which neither of its tables names.
+static const char LV5048_P006FWS_FAULT_11[] = "^D03911,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0";
+static const char LV5048_P006FWS_UNNAMED_FAULT[] = "^D03913,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0";
+
 // Not captured frames: the last field (index 17) is "battery connection is open",
 // and the second reply comes from firmware that omits it.
 static const char LV5048_P006FWS_BATTERY_OPEN[] = "^D03900,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1";

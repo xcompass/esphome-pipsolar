@@ -322,6 +322,9 @@ class TestPi18TextSensorTypes:
     def test_p006mod_text_sensor_present(self):
         assert pi18_ts.CONF_DEVICE_MODE in pi18_ts.TYPES
 
+    def test_p006fws_text_sensor_present(self):
+        assert pi18_ts.CONF_FAULT_DESCRIPTION in pi18_ts.TYPES
+
     def test_raw_response_text_sensors_present(self):
         assert pi18_ts.CONF_LAST_P005GS in pi18_ts.TYPES
         assert pi18_ts.CONF_LAST_P007PIRI in pi18_ts.TYPES
@@ -331,7 +334,7 @@ class TestPi18TextSensorTypes:
         assert pi18_ts.CONF_LAST_P005ET in pi18_ts.TYPES
 
     def test_text_sensor_types_count(self):
-        assert len(pi18_ts.TYPES) == 13
+        assert len(pi18_ts.TYPES) == 14
 
     def test_text_sensor_values_unique(self):
         assert len(pi18_ts.TYPES) == len(set(pi18_ts.TYPES))

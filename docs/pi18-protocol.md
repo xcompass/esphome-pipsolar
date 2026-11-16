@@ -33,6 +33,10 @@ The app waits up to 3 s for CR and sends each command at most 3 times in
 total. It sends again when the reply is empty, fails the CRC, or is a NAK
 (`^0`); that includes set commands the inverter refused.
 
+This component logs a refused query (`^0`) as a warning and handles it like a
+timeout, so the readings it feeds become unknown. Like the app, it tries a
+refused query at most 3 times per update interval.
+
 ## Model classes
 
 The app probes PI18 classes in this order and uses the first that matches:
@@ -257,10 +261,14 @@ contact, LED ring, grid-tie and EN 50549 limits) for other models.
 10–12 differ from the generic P18 table, where 11 is "Main relay failed".
 The app expects a two-digit code, and never raises 52 although it has text.
 
+The `fault_description` text sensor uses this table and gives both meanings
+for 11 ("PV voltage over or main relay failed"), so it also fits larger units.
+It shows "Unknown fault" and the number for codes neither table names.
+
 ## Not implemented by this component
 
 `ED`/`EM`/`EY`, `VFW`, `DI`, `MCHGCR`/`MUCHGCR`, `GMN`, `T`/`DAT`, PIRI field 25,
-fault code text, and the set commands from `BUCD` down in the table above.
+and the set commands from `BUCD` down in the table above.
 
 ## Source and limits
 

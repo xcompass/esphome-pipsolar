@@ -4,6 +4,7 @@
 #include "pipsolar_select.h"
 
 #include <cmath>
+#include <cstdio>
 
 // Fallback for ESPHome < 2026.10.0
 #ifndef ESPHOME_LOG_TAG
@@ -71,14 +72,21 @@ void Pipsolar::loop() {
 
   if (this->state_ == STATE_POLL_COMPLETE) {
     if (this->check_incoming_crc_()) {
-      if (this->read_buffer_[0] == '(' && this->read_buffer_[1] == 'N' && this->read_buffer_[2] == 'A' &&
-          this->read_buffer_[3] == 'K') {
-        ESP_LOGD(TAG, "poll %s NACK", this->enabled_polling_commands_[this->last_polling_command_].command);
-        this->handle_poll_error_(this->enabled_polling_commands_[this->last_polling_command_].identifier);
+      // A PI18 inverter refuses a query it doesn't support with ^0 (PI30 sends (NAK)
+      const bool refused = (this->read_pos_ == 5 && this->read_buffer_[0] == '^' && this->read_buffer_[1] == '0') ||
+                           (this->read_buffer_[0] == '(' && this->read_buffer_[1] == 'N' &&
+                            this->read_buffer_[2] == 'A' && this->read_buffer_[3] == 'K');
+      auto &poll = this->enabled_polling_commands_[this->last_polling_command_];
+      if (refused) {
+        ESP_LOGW(TAG, "poll %s refused", poll.command);
+        if (++poll.refusals >= POLL_ATTEMPTS_MAX)
+          poll.needs_update = false;
+        this->handle_poll_error_(poll.identifier);
         this->state_ = STATE_IDLE;
         return;
       }
-      this->enabled_polling_commands_[this->last_polling_command_].needs_update = false;
+      poll.refusals = 0;
+      poll.needs_update = false;
       this->state_ = STATE_POLL_CHECKED;
       return;
     } else {
@@ -529,6 +537,61 @@ void Pipsolar::handle_p007flag_(const char *message) {
     this->publish_binary_sensor_(this->read_flag_(message, &pos), sensor);
 }
 
+// Fault text from MPP Solar's SolarPower (Events_P181TO2K.xml for 1-4 kW units,
+// Events_P18.xml for the others). The tables differ only in 10-12, and 11 has a
+// different meaning in each.
+struct FaultText {
+  int code;
+  const char *text;
+};
+static const FaultText FAULT_TEXTS[] = {
+    {0, "No fault"},
+    {1, "Fan is locked"},
+    {2, "Over temperature"},
+    {3, "Battery voltage is too high"},
+    {4, "Battery voltage is too low"},
+    {5, "Output short circuited or over temperature"},
+    {6, "Output voltage is too high"},
+    {7, "Over load time out"},
+    {8, "Bus voltage is too high"},
+    {9, "Bus soft start failed"},
+    {10, "PV current over"},
+    {11, "PV voltage over or main relay failed"},
+    {12, "Charge current over"},
+    {51, "Over current inverter"},
+    {52, "Bus soft start failed"},
+    {53, "Inverter soft start failed"},
+    {54, "Self-test failed"},
+    {55, "Over DC voltage on output of inverter"},
+    {56, "Battery connection is open"},
+    {57, "Current sensor failed"},
+    {58, "Output voltage is too low"},
+    {60, "Inverter negative power"},
+    {71, "Parallel version different"},
+    {72, "Output circuit failed"},
+    {80, "CAN communication failed"},
+    {81, "Parallel host line lost"},
+    {82, "Parallel synchronized signal lost"},
+    {83, "Parallel battery voltage detect different"},
+    {84, "Parallel line voltage or frequency detect different"},
+    {85, "Parallel line input current unbalanced"},
+    {86, "Parallel output setting different"},
+};
+
+void Pipsolar::publish_fault_description_(int fault_code) {
+  if (this->fault_description_ == nullptr)
+    return;
+  for (const auto &fault : FAULT_TEXTS) {
+    if (fault.code == fault_code) {
+      this->fault_description_->publish_state(fault.text);
+      return;
+    }
+  }
+  char unknown[32];
+  snprintf(unknown, sizeof(unknown), "Unknown fault %d", fault_code);
+  this->fault_description_->publish_state(unknown);
+}
+
 void Pipsolar::handle_p006fws_(const char *message) {
   if (this->last_p005fws_)
     this->last_p005fws_->publish_state(message);
@@ -538,8 +601,11 @@ void Pipsolar::handle_p006fws_(const char *message) {
   size_t pos = 0;
   skip_start_(message, &pos);
 
-  // A missing fault code must not read as 0 ("no fault")
-  this->publish_sensor_(this->fault_code_, this->read_int_(message, &pos));
+  // A missing fault code must not read as 0 ("no fault"); the description keeps its last text
+  const auto fault_code = this->read_int_(message, &pos);
+  this->publish_sensor_(this->fault_code_, fault_code);
+  if (fault_code.has_value())
+    this->publish_fault_description_(*fault_code);
 
   binary_sensor::BinarySensor *warn_sensors[] = {
       this->warning_line_fail_,
@@ -653,6 +719,7 @@ void Pipsolar::update() {
   for (auto &enabled_polling_command : this->enabled_polling_commands_) {
     if (enabled_polling_command.length != 0) {
       enabled_polling_command.needs_update = true;
+      enabled_polling_command.refusals = 0;
     }
   }
 }

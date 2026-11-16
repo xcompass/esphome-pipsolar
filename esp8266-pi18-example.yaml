@@ -184,6 +184,9 @@ text_sensor:
     # ^P006MOD
     device_mode:
       name: "device mode"
+    # ^P006FWS
+    fault_description:
+      name: "fault description"
     # Raw responses (useful for debugging)
 #    last_p005gs:
 #      name: "last p005gs"
