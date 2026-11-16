@@ -432,5 +432,3 @@ switch:
       name: "alarm on primary source interrupt"
     fault_code_record:
       name: "fault code record"
-    power_saving:
-      name: "power saving"
