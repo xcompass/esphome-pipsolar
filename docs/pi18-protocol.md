@@ -25,6 +25,10 @@ sent in tenths.
 Examples from `docs/pdus/pi18/lv5048.txt`: the `GS` query is `^P005GS` +
 `58 14` + CR, and a `MOD` reply is `^D00503` + `B9 59` + CR (mode 03, battery).
 
+The fault and warning query is `^P006FWS` (`FWS` is 3 characters). This
+component sent `^P005FWS` until November 2026. The LV2424 answers that with a
+reply that carries no data, so the fault code and every FWS warning stayed unknown.
+
 The app waits up to 3 s for CR and sends each command at most 3 times in
 total. It sends again when the reply is empty, fails the CRC, or is a NAK
 (`^0`); that includes set commands the inverter refused.
