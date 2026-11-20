@@ -1,6 +1,10 @@
 """Constants for the pi18 component."""
 
 CONF_SOLAR_POWER_PRIORITY = "solar_power_priority"
+CONF_AC_CHARGE_END_TIME = "ac_charge_end_time"
+CONF_AC_CHARGE_START_TIME = "ac_charge_start_time"
+CONF_AC_OUTPUT_END_TIME = "ac_output_end_time"
+CONF_AC_OUTPUT_START_TIME = "ac_output_start_time"
 CONF_ALARM_ON_WHEN_PRIMARY_SOURCE_INTERRUPT = "alarm_on_when_primary_source_interrupt"
 CONF_BACKLIGHT_ON = "backlight_on"
 CONF_BATTERY_BULK_VOLTAGE = "battery_bulk_voltage"

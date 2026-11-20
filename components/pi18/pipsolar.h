@@ -16,6 +16,7 @@ namespace esphome::pi18 {
 
 class PipsolarSelect;
 class PipsolarNumber;
+class PipsolarTime;
 
 enum class NumberSetting : uint8_t {
   BATTERY_UNDER_VOLTAGE,
@@ -27,6 +28,10 @@ enum class NumberSetting : uint8_t {
   MAX_AC_CHARGING_CURRENT,
 };
 static const size_t NUMBER_SETTING_COUNT = 7;
+
+// One end of the AC charge window (^P007ACCT) or the AC output window (^P007ACLT)
+enum class TimeWindowEnd : uint8_t { AC_CHARGE_START, AC_CHARGE_END, AC_OUTPUT_START, AC_OUTPUT_END };
+static const size_t TIME_WINDOW_END_COUNT = 4;
 
 enum class WriteResult : uint8_t {
   QUEUED,     // the set command is queued
@@ -268,6 +273,18 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   // Allowed values from ^P009MCHGCR / ^P010MUCHGCR; empty until answered or for a voltage
   const std::vector<int> &get_allowed_currents(NumberSetting setting) const;
 
+  // Registers the time entity for one end of a window and the slow poll that feeds it
+  // (^P007ACCT for the charge window, ^P007ACLT for the output window).
+  void set_time_window_end(TimeWindowEnd end, PipsolarTime *entity);
+  // Queues ^S016ACCT or ^S016ACLT. Start and end are sent together, the other end as it is known.
+  WriteResult write_time_setting(TimeWindowEnd end, uint8_t hour, uint8_t minute);
+  // The pending write if any, else the last reading, as hour * 100 + minute; empty until read
+  esphome::optional<uint16_t> get_time_setting(TimeWindowEnd end) const;
+  // The last reading, never a pending write
+  esphome::optional<uint16_t> get_time_reading(TimeWindowEnd end) const {
+    return this->times_[static_cast<size_t>(end)].reading;
+  }
+
   // Bulk and float charge voltages (V): the pending write if any, else the last PIRI reading;
   // empty until the first PIRI reply.
   esphome::optional<float> get_battery_bulk_voltage_setting() const {
@@ -320,6 +337,8 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   void publish_fault_description_(int fault_code);
   void handle_p005et_(const char *message);
   void handle_p007pgs0_(const char *message);
+  void handle_p007acct_(const char *message);
+  void handle_p007aclt_(const char *message);
   void handle_p009mchgcr_(const char *message);
   void handle_p010muchgcr_(const char *message);
 
@@ -327,6 +346,10 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   // value, unless a write to it is still outstanding.
   void apply_reading_(NumberSetting setting, esphome::optional<int32_t> raw, float divisor);
   void set_known_(NumberSetting setting, float value);
+  // Publishes a window reading to both ends; it becomes the known value unless a write is outstanding
+  void apply_time_window_(TimeWindowEnd start, uint16_t start_time, uint16_t end_time);
+  void handle_time_window_(TimeWindowEnd start, const char *message);
+  static esphome::optional<uint16_t> parse_time_(const char *text);
   static std::vector<int> parse_current_list_(const char *message);
 
   PipsolarSelect *lcd_sleep_time_select_{};
@@ -356,6 +379,14 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
     PipsolarNumber *entity = nullptr;
   };
   NumberState numbers_[NUMBER_SETTING_COUNT];
+
+  struct TimeState {
+    esphome::optional<uint16_t> value;    // last reading, or the pending write
+    esphome::optional<uint16_t> reading;  // last reading
+    bool pending = false;                 // value is a write the inverter hasn't confirmed by a reading
+    PipsolarTime *entity = nullptr;
+  };
+  TimeState times_[TIME_WINDOW_END_COUNT];
   std::vector<int> allowed_max_charging_currents_;
   std::vector<int> allowed_max_ac_charging_currents_;
 

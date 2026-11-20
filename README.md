@@ -76,6 +76,23 @@ select:
       name: "LCD sleep time"
 ```
 
+The `datetime` platform has four time entities for the AC charge window and the
+AC output window: `ac_charge_start_time`, `ac_charge_end_time`, `ac_output_start_time`
+and `ac_output_end_time`. They are read every minute. Setting one end sends both
+(`^S016ACCT` or `^S016ACLT`), with the other end as last read, so a write is refused
+until the first reading arrives. Seconds are ignored, and like the numbers the entity
+shows the inverter's reading, not the time you set, until the next reading confirms it.
+
+```yaml
+datetime:
+  - platform: pi18
+    pipsolar_id: inverter0
+    ac_charge_start_time:
+      name: "AC charge start time"
+    ac_charge_end_time:
+      name: "AC charge end time"
+```
+
 ## Requirements
 
 * [ESPHome 2026.3.0 or higher](https://github.com/esphome/esphome/releases).

@@ -348,6 +348,7 @@ import esphome.config_validation as cv  # noqa: E402
 import pytest  # noqa: E402
 
 from components.pi18 import (  # noqa: E402
+    datetime as pi18_datetime,
     number as pi18_number,
     output as pi18_output,
     select as pi18_select,
@@ -456,6 +457,22 @@ class TestPi18NumberTypes:
             "current_max_charging_current": (10.0, 90.0, 10.0),
             "current_max_ac_charging_current": (2.0, 90.0, 1.0),
         }
+
+
+class TestPi18DatetimeTypes:
+    def test_datetime_keys_present(self):
+        assert list(pi18_datetime.TYPES) == [
+            "ac_charge_start_time",
+            "ac_charge_end_time",
+            "ac_output_start_time",
+            "ac_output_end_time",
+        ]
+
+    def test_time_entity_validates(self):
+        config = pi18_datetime.CONFIG_SCHEMA(
+            {"pipsolar_id": "inverter0", "ac_charge_start_time": {"name": "start"}}
+        )
+        assert config["ac_charge_start_time"]["type"] == "TIME"
 
 
 class TestPi18SelectTypes:

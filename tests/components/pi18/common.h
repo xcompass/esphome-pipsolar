@@ -19,6 +19,8 @@ class TestablePipsolar : public Pipsolar {
   using Pipsolar::handle_p007flag_;
   using Pipsolar::handle_p007pgs0_;
   using Pipsolar::handle_p007piri_;
+  using Pipsolar::handle_p007acct_;
+  using Pipsolar::handle_p007aclt_;
   using Pipsolar::handle_p009mchgcr_;
   using Pipsolar::handle_p010muchgcr_;
   using Pipsolar::handle_poll_error_;

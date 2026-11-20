@@ -234,7 +234,6 @@ The same page also offers:
 - `SBT`;
 - `MCHGV` and `PSDV` spinners (for a 24 V bank: bulk and float 24.0–29.2 V,
   cut-off 20.4–24.0 V);
-- the `ACCT` and `ACLT` time windows;
 - the clock.
 
 The app knows about 70 more set commands (generator, second output, dry

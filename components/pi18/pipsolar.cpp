@@ -3,6 +3,7 @@
 #include "esphome/core/log.h"
 #include "pipsolar_number.h"
 #include "pipsolar_select.h"
+#include "pipsolar_time.h"
 
 #include <algorithm>
 #include <cmath>
@@ -487,6 +488,130 @@ WriteResult Pipsolar::write_number_setting(NumberSetting setting, float value) {
   return WriteResult::QUEUED;
 }
 
+namespace {
+
+TimeWindowEnd window_start_of(TimeWindowEnd end) {
+  const bool charge = end == TimeWindowEnd::AC_CHARGE_START || end == TimeWindowEnd::AC_CHARGE_END;
+  return charge ? TimeWindowEnd::AC_CHARGE_START : TimeWindowEnd::AC_OUTPUT_START;
+}
+
+TimeWindowEnd window_end_of(TimeWindowEnd start) {
+  return start == TimeWindowEnd::AC_CHARGE_START ? TimeWindowEnd::AC_CHARGE_END : TimeWindowEnd::AC_OUTPUT_END;
+}
+
+bool is_charge_window(TimeWindowEnd end) { return window_start_of(end) == TimeWindowEnd::AC_CHARGE_START; }
+
+ENUMPollingCommand window_poll(TimeWindowEnd end) {
+  return is_charge_window(end) ? POLLING_P007ACCT : POLLING_P007ACLT;
+}
+
+}  // namespace
+
+void Pipsolar::set_time_window_end(TimeWindowEnd end, PipsolarTime *entity) {
+  this->times_[static_cast<size_t>(end)].entity = entity;
+  if (is_charge_window(end))
+    this->add_polling_command_("^P007ACCT", POLLING_P007ACCT, PollSchedule::SLOW);
+  else
+    this->add_polling_command_("^P007ACLT", POLLING_P007ACLT, PollSchedule::SLOW);
+}
+
+esphome::optional<uint16_t> Pipsolar::get_time_setting(TimeWindowEnd end) const {
+  return this->times_[static_cast<size_t>(end)].value;
+}
+
+// "hhmm" with valid digits only
+esphome::optional<uint16_t> Pipsolar::parse_time_(const char *text) {
+  for (size_t i = 0; i < 4; i++) {
+    if (text[i] < '0' || text[i] > '9')
+      return {};
+  }
+  const uint16_t hour = (text[0] - '0') * 10 + (text[1] - '0');
+  const uint16_t minute = (text[2] - '0') * 10 + (text[3] - '0');
+  if (hour > 23 || minute > 59)
+    return {};
+  return hour * 100 + minute;
+}
+
+void Pipsolar::apply_time_window_(TimeWindowEnd start, uint16_t start_time, uint16_t end_time) {
+  const uint16_t readings[] = {start_time, end_time};
+  const TimeWindowEnd ends[] = {start, window_end_of(start)};
+  for (size_t i = 0; i < 2; i++) {
+    auto &state = this->times_[static_cast<size_t>(ends[i])];
+    state.reading = readings[i];
+#ifdef USE_DATETIME_TIME
+    if (state.entity != nullptr)
+      state.entity->publish_time(readings[i] / 100, readings[i] % 100);
+#endif
+    // A reading taken before a write went out would undo it
+    if (state.pending && this->write_outstanding())
+      continue;
+    state.value = readings[i];
+    state.pending = false;
+  }
+}
+
+// "^D012hhmm,hhmm"
+void Pipsolar::handle_p007acct_(const char *message) {
+  this->handle_time_window_(TimeWindowEnd::AC_CHARGE_START, message);
+}
+
+void Pipsolar::handle_p007aclt_(const char *message) {
+  this->handle_time_window_(TimeWindowEnd::AC_OUTPUT_START, message);
+}
+
+void Pipsolar::handle_time_window_(TimeWindowEnd start, const char *message) {
+  // "^D012" then "hhmm,hhmm"; a missing or short reply has no times
+  const size_t length = strlen(message);
+  esphome::optional<uint16_t> start_time, end_time;
+  if (length >= 5 + 9 && message[9] == ',') {
+    start_time = parse_time_(message + 5);
+    end_time = parse_time_(message + 10);
+  }
+  // A window with one bad time is dropped whole
+  if (!start_time.has_value() || !end_time.has_value())
+    return;
+  this->apply_time_window_(start, *start_time, *end_time);
+}
+
+WriteResult Pipsolar::write_time_setting(TimeWindowEnd end, uint8_t hour, uint8_t minute) {
+  if (hour > 23 || minute > 59) {
+    ESP_LOGW(TAG, "%02d:%02d isn't a time", hour, minute);
+    return WriteResult::REJECTED;
+  }
+  const uint16_t time = hour * 100 + minute;
+  if (this->get_time_setting(end) == time) {
+    ESP_LOGD(TAG, "The window end is already %04d", time);
+    return WriteResult::UNCHANGED;
+  }
+  const TimeWindowEnd start = window_start_of(end);
+  const TimeWindowEnd finish = window_end_of(start);
+  const TimeWindowEnd partner = end == start ? finish : start;
+  const auto partner_known = this->get_time_setting(partner);
+  if (!partner_known.has_value()) {
+    ESP_LOGW(TAG, "The other end of the window isn't known yet");
+    return WriteResult::REJECTED;
+  }
+  const bool queue_has_room = std::any_of(std::begin(this->command_queue_), std::end(this->command_queue_),
+                                          [](const std::string &command) { return command.empty(); });
+  if (!queue_has_room) {
+    ESP_LOGW(TAG, "Command queue full");
+    return WriteResult::REJECTED;
+  }
+  const uint16_t start_time = end == start ? time : *partner_known;
+  const uint16_t end_time = end == start ? *partner_known : time;
+  char command[32];
+  snprintf(command, sizeof(command), "^S016%s%04u,%04u", is_charge_window(end) ? "ACCT" : "ACLT",
+           static_cast<unsigned>(start_time), static_cast<unsigned>(end_time));
+  this->queue_command(command);
+  for (TimeWindowEnd written : {end, partner}) {
+    auto &state = this->times_[static_cast<size_t>(written)];
+    state.value = written == end ? time : *partner_known;
+    state.pending = true;
+  }
+  this->request_poll_refresh(window_poll(end));
+  return WriteResult::QUEUED;
+}
+
 std::vector<int> Pipsolar::parse_current_list_(const char *message) {
   std::vector<int> values;
   const size_t length = strlen(message);
@@ -541,6 +666,12 @@ void Pipsolar::handle_poll_response_(ENUMPollingCommand polling_command, const c
       break;
     case POLLING_P007PGS0:
       handle_p007pgs0_(message);
+      break;
+    case POLLING_P007ACCT:
+      handle_p007acct_(message);
+      break;
+    case POLLING_P007ACLT:
+      handle_p007aclt_(message);
       break;
     case POLLING_P009MCHGCR:
       handle_p009mchgcr_(message);

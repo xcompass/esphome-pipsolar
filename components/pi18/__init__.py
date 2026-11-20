@@ -14,6 +14,7 @@ AUTO_LOAD = [
     "select",
     "output",
     "number",
+    "datetime",
 ]
 MULTI_CONF = True
 

@@ -435,6 +435,20 @@ number:
     current_max_ac_charging_current:
       name: "max ac charging current"
 
+# The AC charge window (the inverter may charge from the grid in it) and the AC output window.
+# Writing one end sends both, the other as last read, so wait for the first reading.
+datetime:
+  - platform: pi18
+    pipsolar_id: inverter0
+    ac_charge_start_time:
+      name: "AC charge start time"
+    ac_charge_end_time:
+      name: "AC charge end time"
+    ac_output_start_time:
+      name: "AC output start time"
+    ac_output_end_time:
+      name: "AC output end time"
+
 switch:
   - platform: pi18
     pipsolar_id: inverter0
