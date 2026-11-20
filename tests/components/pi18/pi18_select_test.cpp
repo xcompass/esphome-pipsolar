@@ -35,6 +35,22 @@ void add_lcd_sleep_maps(PipsolarSelect &s) {
   s.add_status_mapping("20", "10 min");
 }
 
+// LV5048_P007PIRI_BANANNAJOE with battery type (field 13) 0, AGM; the length is unchanged
+std::string piri_with_agm() {
+  std::string frame = LV5048_P007PIRI_BANANNAJOE;
+  const size_t at = frame.find(",2,010,060");
+  frame.replace(at + 1, 1, "0");
+  return frame;
+}
+
+// Commands waiting in any queue slot
+size_t queued_count(const TestablePipsolar &inv) {
+  size_t count = 0;
+  for (size_t i = 0; i < 10; i++)
+    count += inv.queued_command(i).empty() ? 0 : 1;
+  return count;
+}
+
 struct Fixture {
   FakeUart uart;
   TestablePipsolar inv;
@@ -44,7 +60,6 @@ struct Fixture {
 
   Fixture() {
     this->inv.set_uart_parent(&this->uart);
-    this->inv.set_command_timeout_ms(1);
     this->battery_type.set_parent(&this->inv);
     this->battery_type.set_skip_unchanged(true);
     this->battery_type.traits.set_options({"AGM", "Flooded", "User"});
@@ -136,6 +151,44 @@ TEST(Pi18SelectTest, ExistingSelectsStillAlwaysWrite) {
   EXPECT_EQ(std::string(f.priority.current_option().c_str()), "A");
   f.select(f.priority, "A");
   EXPECT_EQ(f.inv.queued_command(), "^S007POP0");
+}
+
+TEST(Pi18SelectTest, RevertBeforeReadingIsSent) {
+  Fixture f;
+  f.inv.handle_p007piri_(piri_with_agm().c_str());
+  f.select(f.battery_type, "User");
+  f.select(f.battery_type, "AGM");  // back to what the last reading says, but a write is pending
+  EXPECT_EQ(f.inv.queued_command(0), "^S007PBT2");
+  EXPECT_EQ(f.inv.queued_command(1), "^S007PBT0");
+}
+
+TEST(Pi18SelectTest, InFlightReadingKeepsThePendingOption) {
+  Fixture f;
+  f.inv.handle_p007piri_(LV5048_P007PIRI_BANANNAJOE);  // User
+  f.inv.loop();                                        // PIRI sent, reply not yet read
+  f.select(f.battery_type, "AGM");
+  f.uart.receive(f.inv.reply(LV5048_P007PIRI_BANANNAJOE));  // the old reading arrives
+  f.inv.run(f.uart, 6);                                     // ... and the write is sent
+  f.uart.receive(f.inv.reply("^1"));
+  f.inv.run(f.uart, 6);
+  EXPECT_EQ(f.uart.count_sent("^S007PBT0"), 1u);
+  // The select shows the inverter's reading, but the pending write is still the known value
+  EXPECT_EQ(std::string(f.battery_type.current_option().c_str()), "User");
+  f.select(f.battery_type, "AGM");
+  EXPECT_EQ(queued_count(f.inv), 0u);
+}
+
+TEST(Pi18SelectTest, RefusedSelectWriteReverts) {
+  Fixture f;
+  f.inv.handle_p007piri_(LV5048_P007PIRI_BANANNAJOE);  // User
+  f.select(f.battery_type, "AGM");
+  f.answer("^0");  // the inverter refuses the write
+  EXPECT_EQ(f.uart.count_sent("^S007PBT0"), 1u);
+  f.select(f.battery_type, "AGM");  // no reading yet: the pending option is still the known one
+  EXPECT_EQ(queued_count(f.inv), 0u);
+  f.inv.handle_p007piri_(LV5048_P007PIRI_BANANNAJOE);  // the next reading: still User
+  f.select(f.battery_type, "AGM");
+  EXPECT_EQ(queued_count(f.inv), 1u);
 }
 
 }  // namespace esphome::pi18::testing

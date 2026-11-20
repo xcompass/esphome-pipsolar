@@ -19,7 +19,7 @@ void PipsolarSelect::control(const std::string &value) {
     ESP_LOGD(TAG, "could not find option %s in mapping", value.c_str());
     return;
   }
-  if (this->skip_unchanged_ && value == this->last_reading_) {
+  if (this->skip_unchanged_ && value == (this->pending_.empty() ? this->last_reading_ : this->pending_)) {
     ESP_LOGD(TAG, "option %s is already selected, nothing sent", value.c_str());
     return;
   }
@@ -27,6 +27,8 @@ void PipsolarSelect::control(const std::string &value) {
   this->parent_->queue_command(it->second);
   if (this->has_refresh_poll_)
     this->parent_->request_poll_refresh(this->refresh_poll_);
+  if (this->skip_unchanged_)
+    this->pending_ = value;
   if (this->optimistic_)
     this->publish_state(value);
 }
@@ -40,6 +42,9 @@ void PipsolarSelect::map_and_publish(const std::string &value) {
   }
   ESP_LOGD(TAG, "found mapped option %s for option %s", it->second.c_str(), value.c_str());
   this->last_reading_ = it->second;
+  // A reading taken before a write went out must not undo it; a refused write reverts here
+  if (this->parent_ == nullptr || !this->parent_->write_outstanding())
+    this->pending_.clear();
   this->publish_state(it->second);
 }
 

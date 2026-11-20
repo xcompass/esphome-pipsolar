@@ -248,6 +248,9 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
 
   void queue_command(const std::string &command);
 
+  // Any command queued, or one being sent or answered
+  bool write_outstanding() const;
+
   // Sends the poll again soon. Does nothing for a poll that isn't registered or
   // that the inverter doesn't support.
   void request_poll_refresh(ENUMPollingCommand id);
@@ -320,8 +323,6 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   void handle_p009mchgcr_(const char *message);
   void handle_p010muchgcr_(const char *message);
 
-  // Any command queued, or one being sent or answered
-  bool write_outstanding_() const;
   // Publishes a PIRI field (raw / divisor) to the setting's number. It also becomes the known
   // value, unless a write to it is still outstanding.
   void apply_reading_(NumberSetting setting, esphome::optional<int32_t> raw, float divisor);

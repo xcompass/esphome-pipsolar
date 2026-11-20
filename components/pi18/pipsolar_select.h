@@ -30,13 +30,15 @@ class PipsolarSelect : public Component, public select::Select {
  protected:
   std::map<std::string, std::string> mapping_;
   std::map<std::string, std::string> status_mapping_;
-  Pipsolar *parent_;
+  Pipsolar *parent_{nullptr};
   bool optimistic_{false};
   bool skip_unchanged_{false};
   bool has_refresh_poll_{false};
   ENUMPollingCommand refresh_poll_{};
   // The option the inverter last reported; empty before the first reading
   std::string last_reading_;
+  // The option last written and not yet confirmed by a later reading; empty if none
+  std::string pending_;
 };
 
 }  // namespace esphome::pi18

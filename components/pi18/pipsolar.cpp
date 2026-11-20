@@ -412,7 +412,7 @@ void Pipsolar::set_known_(NumberSetting setting, float value) {
   state.pending = true;
 }
 
-bool Pipsolar::write_outstanding_() const {
+bool Pipsolar::write_outstanding() const {
   if (this->state_ == STATE_COMMAND || this->state_ == STATE_COMMAND_COMPLETE)
     return true;
   return std::any_of(std::begin(this->command_queue_), std::end(this->command_queue_),
@@ -429,7 +429,7 @@ void Pipsolar::apply_reading_(NumberSetting setting, esphome::optional<int32_t> 
   if (state.entity != nullptr)
     state.entity->publish_state(reading);
   // A reading taken before a write went out would undo it
-  if (state.pending && this->write_outstanding_())
+  if (state.pending && this->write_outstanding())
     return;
   state.value = reading;
   state.pending = false;
