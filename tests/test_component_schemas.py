@@ -350,6 +350,7 @@ import pytest  # noqa: E402
 from components.pi18 import (  # noqa: E402
     number as pi18_number,
     output as pi18_output,
+    select as pi18_select,
     switch as pi18_switch,
 )
 from components.pi18.const import (  # noqa: E402
@@ -455,3 +456,47 @@ class TestPi18NumberTypes:
             "current_max_charging_current": (10.0, 90.0, 10.0),
             "current_max_ac_charging_current": (2.0, 90.0, 1.0),
         }
+
+
+class TestPi18SelectTypes:
+    def _validate(self, **keys):
+        return pi18_select.CONFIG_SCHEMA({"pipsolar_id": "inverter0", **keys})
+
+    def test_new_selects_have_built_in_maps(self):
+        config = self._validate(
+            battery_type={"name": "battery type"},
+            lcd_sleep_time={"name": "LCD sleep"},
+        )
+        assert "optionsmap" not in config["battery_type"]
+        battery, battery_status = pi18_select.DEFAULT_MAPS["battery_type"]
+        assert battery == {
+            "AGM": "^S007PBT0",
+            "Flooded": "^S007PBT1",
+            "User": "^S007PBT2",
+        }
+        assert battery_status == {"0": "AGM", "1": "Flooded", "2": "User"}
+        lcd, lcd_status = pi18_select.DEFAULT_MAPS["lcd_sleep_time"]
+        assert lcd == {
+            "None": "^S008LST00",
+            "30 s": "^S008LST01",
+            "60 s": "^S008LST02",
+            "5 min": "^S008LST10",
+            "10 min": "^S008LST20",
+        }
+        assert lcd_status == {
+            "0": "None",
+            "1": "30 s",
+            "2": "60 s",
+            "10": "5 min",
+            "20": "10 min",
+        }
+
+    def test_built_in_maps_can_be_replaced(self):
+        config = self._validate(
+            battery_type={"name": "type", "optionsmap": {"Mine": "^S007PBT2"}}
+        )
+        assert config["battery_type"]["optionsmap"] == {"Mine": "^S007PBT2"}
+
+    def test_existing_selects_still_need_an_optionsmap(self):
+        with pytest.raises(cv.Invalid, match="optionsmap"):
+            self._validate(output_source_priority={"name": "priority"})

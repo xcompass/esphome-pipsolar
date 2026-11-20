@@ -223,6 +223,13 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   PIPSOLAR_SELECT(current_max_charging_current_select, P007PIRI)
   PIPSOLAR_SELECT(current_max_ac_charging_current_select, P007PIRI)
   PIPSOLAR_SELECT(battery_under_voltage_select, P007PIRI)
+  PIPSOLAR_SELECT(battery_type_select, P007PIRI)
+
+  // LCD sleep time (^P006LST) is read slowly: it only changes when someone writes it
+  void set_lcd_sleep_time_select(PipsolarSelect *select) {
+    this->lcd_sleep_time_select_ = select;
+    this->add_polling_command_("^P006LST", POLLING_P006LST, PollSchedule::SLOW);
+  }
 
   // Switches — on/off commands are full ^S<len><cmd> strings
   PIPSOLAR_SWITCH(output_source_priority_switch, P007PIRI)
@@ -303,6 +310,7 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   void handle_poll_error_(ENUMPollingCommand polling_command);
   void handle_p005gs_(const char *message);
   void handle_p007piri_(const char *message);
+  void handle_p006lst_(const char *message);
   void handle_p006mod_(const char *message);
   void handle_p007flag_(const char *message);
   void handle_p006fws_(const char *message);
@@ -319,6 +327,8 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   void apply_reading_(NumberSetting setting, esphome::optional<int32_t> raw, float divisor);
   void set_known_(NumberSetting setting, float value);
   static std::vector<int> parse_current_list_(const char *message);
+
+  PipsolarSelect *lcd_sleep_time_select_{};
 
   void publish_mppt_status_(text_sensor::TextSensor *sensor, esphome::optional<int32_t> value);
   void publish_direction_(text_sensor::TextSensor *sensor, esphome::optional<int32_t> value);

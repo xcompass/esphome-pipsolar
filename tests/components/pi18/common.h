@@ -14,6 +14,7 @@ class TestablePipsolar : public Pipsolar {
   using Pipsolar::handle_p005et_;
   using Pipsolar::handle_p006fws_;
   using Pipsolar::handle_p005gs_;
+  using Pipsolar::handle_p006lst_;
   using Pipsolar::handle_p006mod_;
   using Pipsolar::handle_p007flag_;
   using Pipsolar::handle_p007pgs0_;

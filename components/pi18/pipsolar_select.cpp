@@ -19,8 +19,14 @@ void PipsolarSelect::control(const std::string &value) {
     ESP_LOGD(TAG, "could not find option %s in mapping", value.c_str());
     return;
   }
+  if (this->skip_unchanged_ && value == this->last_reading_) {
+    ESP_LOGD(TAG, "option %s is already selected, nothing sent", value.c_str());
+    return;
+  }
   ESP_LOGD(TAG, "found mapped option %s for option %s", it->second.c_str(), value.c_str());
   this->parent_->queue_command(it->second);
+  if (this->has_refresh_poll_)
+    this->parent_->request_poll_refresh(this->refresh_poll_);
   if (this->optimistic_)
     this->publish_state(value);
 }
@@ -33,6 +39,7 @@ void PipsolarSelect::map_and_publish(const std::string &value) {
     return;
   }
   ESP_LOGD(TAG, "found mapped option %s for option %s", it->second.c_str(), value.c_str());
+  this->last_reading_ = it->second;
   this->publish_state(it->second);
 }
 

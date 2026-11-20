@@ -268,8 +268,9 @@ It shows "Unknown fault" and the number for codes neither table names.
 ## Not implemented by this component
 
 `ED`/`EM`/`EY`, `VFW`, `DI`, `GMN`, `T`/`DAT`, PIRI field 25, and the set commands
-from `PBT` down in the table above. The `number` platform covers `PSDV`, `MCHGV`,
-`BUCD`, `MCHGC` and `MUCHGC`, and reads `MCHGCR`/`MUCHGCR`.
+from `PGR` down in the table above, except `LST`. The `number` platform covers `PSDV`, `MCHGV`,
+`BUCD`, `MCHGC` and `MUCHGC`, and reads `MCHGCR`/`MUCHGCR`. The `select` platform
+sets `PBT` and `LST`, and reads `LST` with `^P006LST` every 60 s.
 
 ## Source and limits
 

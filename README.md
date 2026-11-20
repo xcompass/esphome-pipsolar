@@ -61,6 +61,21 @@ returning to the utility at 24.0 V:
 ```
 
 
+The `select` platform has two types with built-in options: `battery_type` (AGM,
+Flooded, User) and `lcd_sleep_time` (None, 30 s, 60 s, 5 min, 10 min). Give them
+only a `name`; an `optionsmap` and `statusmap` replace the built-in ones. Choosing
+the option the inverter already reports sends nothing.
+
+```yaml
+select:
+  - platform: pi18
+    pipsolar_id: inverter0
+    battery_type:
+      name: "battery type"
+    lcd_sleep_time:
+      name: "LCD sleep time"
+```
+
 ## Requirements
 
 * [ESPHome 2026.3.0 or higher](https://github.com/esphome/esphome/releases).
