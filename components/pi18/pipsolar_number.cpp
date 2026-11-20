@@ -29,13 +29,14 @@ void PipsolarNumber::control(float value) {
   if (step > 0.0f) {
     const float from_min = value - this->traits.get_min_value();
     if (std::fabs(from_min - std::round(from_min / step) * step) > tolerance) {
-      ESP_LOGW(TAG, "'%s': %.2f isn't a multiple of %.2f", this->get_name().c_str(), value, step);
+      ESP_LOGW(TAG, "'%s': %.2f isn't a multiple of %.2f", setting_name(this->setting_), value, step);
       this->republish_reading_();
       return;
     }
   }
   if (value > tolerance && value < this->min_nonzero_value_ - tolerance) {
-    ESP_LOGW(TAG, "'%s': %.2f is between full (0) and %.2f", this->get_name().c_str(), value, this->min_nonzero_value_);
+    ESP_LOGW(TAG, "'%s': %.2f is between full (0) and %.2f", setting_name(this->setting_), value,
+             this->min_nonzero_value_);
     this->republish_reading_();
     return;
   }

@@ -75,12 +75,29 @@ TEST(Pi18ClockTest, SyncQueuesTheCommand) {
 }
 
 TEST(Pi18ClockTest, FullQueueDropsTheSyncAndRefreshesNothing) {
+  FakeUart uart;
   TestablePipsolar inv;
   text_sensor::TextSensor clock;
+  inv.set_uart_parent(&uart);
   inv.set_inverter_time(&clock);
+  // Let the first clock poll go out and be answered, so no refresh is pending
+  for (int i = 0; i < 6; i++) {
+    inv.loop();
+    uart.receive(inv.reply(LV5048_P004T));
+    inv.run(uart, 6);
+  }
+  ASSERT_EQ(uart.count_sent("^P004T"), 1u);
   for (int i = 0; i < 10; i++)
     EXPECT_TRUE(inv.queue_command("^S000FILL"));
   EXPECT_FALSE(inv.sync_clock(make_time(2026, 11, 20, 3, 0, 5)));
+  for (int i = 0; i < 40; i++) {  // drains the queue
+    inv.loop();
+    uart.receive(inv.reply("^1"));
+    inv.run(uart, 6);
+  }
+  EXPECT_EQ(uart.count_sent("^S000FILL"), 10u);
+  EXPECT_EQ(uart.count_sent("^S018DAT261120030005"), 0u);
+  EXPECT_EQ(uart.count_sent("^P004T"), 1u);  // the dropped sync asked for no refresh
 }
 
 TEST(Pi18ClockTest, InverterTimeRegistersTheClockPoll) {

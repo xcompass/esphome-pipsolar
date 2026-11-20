@@ -40,7 +40,8 @@ void PipsolarOutput::write_charge_voltage_(float state) {
     return;
   }
   if (!this->parent_->set_charge_voltages(*bulk, *flt)) {
-    ESP_LOGW(TAG, "Not setting the %s voltage: %.1f / %.1f V doesn't fit the command", name, *bulk, *flt);
+    ESP_LOGW(TAG, "Not setting the %s voltage: %.1f / %.1f V is out of range or the command queue is full", name, *bulk,
+             *flt);
     return;
   }
   ESP_LOGD(TAG, "Will write %s voltage %.1f V (bulk %.1f V, float %.1f V)", name, state, *bulk, *flt);

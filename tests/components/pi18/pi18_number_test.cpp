@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <string>
 #include "common.h"
 #include "esphome/components/pi18/pipsolar_number.h"
 #include "frames_lv5048.h"
@@ -54,6 +55,7 @@ TEST(Pi18NumberTest, PendingWriteDoesNotHideTheReading) {
 
 TEST(Pi18NumberTest, OffStepValueIsRejected) {
   NumberFixture f(NumberSetting::BATTERY_FLOAT_VOLTAGE, 48.0f, 58.4f, 0.1f);
+  f.number.publish_state(30.0f);  // as if the UI had moved it
   f.set(53.55f);
   EXPECT_EQ(f.inv.queued_command(), "");
   EXPECT_FLOAT_EQ(f.number.state, 54.0f);
@@ -62,12 +64,29 @@ TEST(Pi18NumberTest, OffStepValueIsRejected) {
 TEST(Pi18NumberTest, FullGapIsRejectedAndZeroMeansFull) {
   NumberFixture f(NumberSetting::BATTERY_REDISCHARGE_VOLTAGE, 0.0f, 58.0f, 1.0f);
   f.number.set_min_nonzero_value(48.0f);
+  f.number.publish_state(12.0f);  // as if the UI had moved it
   f.set(12.0f);
   EXPECT_EQ(f.inv.queued_command(), "");
   EXPECT_FLOAT_EQ(f.number.state, 52.0f);
   f.set(0.0f);
   EXPECT_EQ(f.inv.queued_command(), "^S014BUCD500,000");
   EXPECT_FLOAT_EQ(f.number.state, 52.0f);
+}
+
+TEST(Pi18NumberTest, TwentyFourVoltFloatIsWrittenWithTheBulkFromTheReading) {
+  NumberFixture f(NumberSetting::BATTERY_FLOAT_VOLTAGE, 24.0f, 29.2f, 0.1f);
+  // LV5048_P007PIRI_BANANNAJOE with bulk 29.0 V and float 28.2 V; same length
+  std::string frame = LV5048_P007PIRI_BANANNAJOE;
+  const size_t at = frame.find("554,540");
+  ASSERT_NE(at, std::string::npos);
+  frame.replace(at, 7, "290,282");
+  f.inv.handle_p007piri_(frame.c_str());
+  EXPECT_FLOAT_EQ(f.number.state, 28.2f);
+  f.set(28.1f);
+  EXPECT_EQ(f.inv.queued_command(0), "^S015MCHGV290,281");
+  f.set(28.2f);  // back to the reading, but the lower write is still pending
+  EXPECT_EQ(f.inv.queued_command(1), "^S015MCHGV290,282");
+  EXPECT_FLOAT_EQ(f.number.state, 28.2f);
 }
 
 TEST(Pi18NumberTest, UnchangedValueKeepsState) {

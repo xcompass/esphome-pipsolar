@@ -291,21 +291,6 @@ bool Pipsolar::set_charge_voltages(float bulk_voltage, float float_voltage) {
   return true;
 }
 
-namespace {
-
-constexpr int MAX_FIELD_VALUE = 999;  // every setting is sent as three digits
-
-bool is_current(NumberSetting setting) {
-  return setting == NumberSetting::MAX_CHARGING_CURRENT || setting == NumberSetting::MAX_AC_CHARGING_CURRENT;
-}
-
-// Voltages are sent in tenths, currents in whole amps; -1 when the value can't be sent
-int to_units(NumberSetting setting, float value) {
-  if (!std::isfinite(value) || std::fabs(value) > 1000.0f)
-    return -1;
-  return static_cast<int>(std::lround(value * (is_current(setting) ? 1.0f : 10.0f)));
-}
-
 const char *setting_name(NumberSetting setting) {
   switch (setting) {
     case NumberSetting::BATTERY_UNDER_VOLTAGE:
@@ -325,6 +310,21 @@ const char *setting_name(NumberSetting setting) {
     default:
       return "setting";
   }
+}
+
+namespace {
+
+constexpr int MAX_FIELD_VALUE = 999;  // every setting is sent as three digits
+
+bool is_current(NumberSetting setting) {
+  return setting == NumberSetting::MAX_CHARGING_CURRENT || setting == NumberSetting::MAX_AC_CHARGING_CURRENT;
+}
+
+// Voltages are sent in tenths, currents in whole amps; -1 when the value can't be sent
+int to_units(NumberSetting setting, float value) {
+  if (!std::isfinite(value) || std::fabs(value) > 1000.0f)
+    return -1;
+  return static_cast<int>(std::lround(value * (is_current(setting) ? 1.0f : 10.0f)));
 }
 
 // The other half of a setting sent as a pair; the setting itself when it has none

@@ -29,15 +29,23 @@ enum class NumberSetting : uint8_t {
   MAX_AC_CHARGING_CURRENT,
 };
 static const size_t NUMBER_SETTING_COUNT = 7;
+static_assert(static_cast<size_t>(NumberSetting::MAX_AC_CHARGING_CURRENT) + 1 == NUMBER_SETTING_COUNT,
+              "NUMBER_SETTING_COUNT must follow the last NumberSetting");
+
+// A short name for logs, such as "float voltage"
+const char *setting_name(NumberSetting setting);
 
 // One end of the AC charge window (^P007ACCT) or the AC output window (^P007ACLT)
 enum class TimeWindowEnd : uint8_t { AC_CHARGE_START, AC_CHARGE_END, AC_OUTPUT_START, AC_OUTPUT_END };
 static const size_t TIME_WINDOW_END_COUNT = 4;
+static_assert(static_cast<size_t>(TimeWindowEnd::AC_OUTPUT_END) + 1 == TIME_WINDOW_END_COUNT,
+              "TIME_WINDOW_END_COUNT must follow the last TimeWindowEnd");
 
 enum class WriteResult : uint8_t {
   QUEUED,     // the set command is queued
   UNCHANGED,  // equals the known value; nothing sent
-  REJECTED,   // can't be encoded, isn't an allowed current, or the partner value is unknown; nothing sent
+  REJECTED,   // can't be encoded, isn't an allowed current, the partner value is unknown or the queue is full;
+              // nothing sent
 };
 
 enum ENUMPollingCommand {
@@ -308,7 +316,7 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
     return this->get_number_setting(NumberSetting::BATTERY_FLOAT_VOLTAGE);
   }
   // Queues ^S015MCHGV, which always sets both voltages. Returns false, and queues
-  // nothing, when a voltage is outside 0.1-99.9 V.
+  // nothing, when a voltage is outside 0.1-99.9 V or the command queue is full.
   bool set_charge_voltages(float bulk_voltage, float float_voltage);
   // "^S015MCHGV<bulk>,<float>" in 0.1 V with three digits each, or "" if a value doesn't fit
   static std::string charge_voltage_command(float bulk_voltage, float float_voltage);
