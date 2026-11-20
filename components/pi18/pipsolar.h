@@ -10,9 +10,29 @@
 #include "esphome/core/component.h"
 #include "esphome/core/helpers.h"
 
+#include <vector>
+
 namespace esphome::pi18 {
 
 class PipsolarSelect;
+class PipsolarNumber;
+
+enum class NumberSetting : uint8_t {
+  BATTERY_UNDER_VOLTAGE,
+  BATTERY_BULK_VOLTAGE,
+  BATTERY_FLOAT_VOLTAGE,
+  BATTERY_RECHARGE_VOLTAGE,
+  BATTERY_REDISCHARGE_VOLTAGE,
+  MAX_CHARGING_CURRENT,
+  MAX_AC_CHARGING_CURRENT,
+};
+static const size_t NUMBER_SETTING_COUNT = 7;
+
+enum class WriteResult : uint8_t {
+  QUEUED,     // the set command is queued
+  UNCHANGED,  // equals the known value; nothing sent
+  REJECTED,   // can't be encoded, isn't an allowed current, or the partner value is unknown; nothing sent
+};
 
 enum ENUMPollingCommand {
   POLLING_P007PIRI = 0,
@@ -225,10 +245,25 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   // that the inverter doesn't support.
   void request_poll_refresh(ENUMPollingCommand id);
 
-  // Bulk and float charge voltages (V) from the last PIRI reply or charge voltage
-  // write; empty until the first PIRI reply.
-  esphome::optional<float> get_battery_bulk_voltage_setting() const { return this->battery_bulk_voltage_setting_; }
-  esphome::optional<float> get_battery_float_voltage_setting() const { return this->battery_float_voltage_setting_; }
+  // Registers the number entity for a setting and the polls that feed it: ^P007PIRI, and for the
+  // two currents their allowed-value lists (^P009MCHGCR, ^P010MUCHGCR) until first answered.
+  void set_number(NumberSetting setting, PipsolarNumber *number);
+  // Queues the set command for a setting (voltages in V, currents in A). A pair setting (bulk and
+  // float, back to utility and back to battery) is sent together with its partner's known value.
+  WriteResult write_number_setting(NumberSetting setting, float value);
+  // The pending write if any, else the last reading; empty until the first PIRI reply
+  esphome::optional<float> get_number_setting(NumberSetting setting) const;
+  // Allowed values from ^P009MCHGCR / ^P010MUCHGCR; empty until answered or for a voltage
+  const std::vector<int> &get_allowed_currents(NumberSetting setting) const;
+
+  // Bulk and float charge voltages (V): the pending write if any, else the last PIRI reading;
+  // empty until the first PIRI reply.
+  esphome::optional<float> get_battery_bulk_voltage_setting() const {
+    return this->get_number_setting(NumberSetting::BATTERY_BULK_VOLTAGE);
+  }
+  esphome::optional<float> get_battery_float_voltage_setting() const {
+    return this->get_number_setting(NumberSetting::BATTERY_FLOAT_VOLTAGE);
+  }
   // Queues ^S015MCHGV, which always sets both voltages. Returns false, and queues
   // nothing, when a voltage is outside 0.1-99.9 V.
   bool set_charge_voltages(float bulk_voltage, float float_voltage);
@@ -272,6 +307,15 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   void publish_fault_description_(int fault_code);
   void handle_p005et_(const char *message);
   void handle_p007pgs0_(const char *message);
+  void handle_p009mchgcr_(const char *message);
+  void handle_p010muchgcr_(const char *message);
+
+  // Any command queued, or one being sent or answered
+  bool write_outstanding_() const;
+  // Takes a PIRI field as the setting's known value, unless a write to it is still outstanding
+  void apply_reading_(NumberSetting setting, esphome::optional<int32_t> raw, float scale);
+  void set_known_(NumberSetting setting, float value);
+  static std::vector<int> parse_current_list_(const char *message);
 
   void publish_mppt_status_(text_sensor::TextSensor *sensor, esphome::optional<int32_t> value);
   void publish_direction_(text_sensor::TextSensor *sensor, esphome::optional<int32_t> value);
@@ -291,8 +335,14 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   esphome::optional<bool> read_flag_(const char *message, size_t *pos);
   void read_sensor_(const char *message, size_t *pos, sensor::Sensor *sensor, float scale = 1.0f);
 
-  esphome::optional<float> battery_bulk_voltage_setting_;
-  esphome::optional<float> battery_float_voltage_setting_;
+  struct NumberState {
+    esphome::optional<float> value;  // last reading, or the pending write
+    bool pending = false;            // value is a write the inverter hasn't confirmed by a reading
+    PipsolarNumber *entity = nullptr;
+  };
+  NumberState numbers_[NUMBER_SETTING_COUNT];
+  std::vector<int> allowed_max_charging_currents_;
+  std::vector<int> allowed_max_ac_charging_currents_;
 
   std::string command_queue_[COMMAND_QUEUE_LENGTH];
   uint8_t command_queue_position_ = 0;
