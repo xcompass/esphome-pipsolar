@@ -6,7 +6,7 @@ namespace esphome::pi18::testing {
 namespace {
 
 constexpr uint32_t UPDATE_INTERVAL_MS = 30000;  // 2 updates make one slow interval
-constexpr const char *SLOW_POLL = "^P006LST";
+constexpr const char *SLOW_POLL = "^P004T";
 constexpr const char *STATUS_POLL = "^P006MOD";
 
 struct Fixture {
@@ -54,7 +54,7 @@ struct Fixture {
 
 TEST(Pi18PollScheduleTest, SlowPollIsSentOncePerInterval) {
   Fixture f;
-  f.add(SLOW_POLL, POLLING_P006LST, PollSchedule::SLOW);
+  f.add(SLOW_POLL, POLLING_P004T, PollSchedule::SLOW);
   f.answer_every_poll("^D0050");
   EXPECT_EQ(f.uart.count_sent(SLOW_POLL), 1u);
   f.inv.update();
@@ -67,7 +67,7 @@ TEST(Pi18PollScheduleTest, SlowPollIsSentOncePerInterval) {
 
 TEST(Pi18PollScheduleTest, StatusPollsStillRunEveryUpdate) {
   Fixture f;
-  f.add(SLOW_POLL, POLLING_P006LST, PollSchedule::SLOW);
+  f.add(SLOW_POLL, POLLING_P004T, PollSchedule::SLOW);
   f.answer_every_poll("^D0050");
   f.inv.update();
   f.answer_every_poll("^D0050");
@@ -77,9 +77,9 @@ TEST(Pi18PollScheduleTest, StatusPollsStillRunEveryUpdate) {
 
 TEST(Pi18PollScheduleTest, RefreshSendsASlowPollBeforeItsInterval) {
   Fixture f;
-  f.add(SLOW_POLL, POLLING_P006LST, PollSchedule::SLOW);
+  f.add(SLOW_POLL, POLLING_P004T, PollSchedule::SLOW);
   f.answer_every_poll("^D0050");
-  f.inv.request_poll_refresh(POLLING_P006LST);
+  f.inv.request_poll_refresh(POLLING_P004T);
   f.answer_every_poll("^D0050");
   EXPECT_EQ(f.uart.count_sent(SLOW_POLL), 2u);
 }
@@ -97,7 +97,7 @@ TEST(Pi18PollScheduleTest, OncePollStopsAfterItsFirstAnswer) {
 
 TEST(Pi18PollScheduleTest, UnansweredSlowPollStopsAfterThreeAttempts) {
   Fixture f;
-  f.add(SLOW_POLL, POLLING_P006LST, PollSchedule::SLOW);
+  f.add(SLOW_POLL, POLLING_P004T, PollSchedule::SLOW);
   f.run_unanswered();
   EXPECT_EQ(f.uart.count_sent(SLOW_POLL), 3u);
   EXPECT_GT(f.uart.count_sent(STATUS_POLL), 3u);  // the status poll keeps being retried
@@ -105,7 +105,7 @@ TEST(Pi18PollScheduleTest, UnansweredSlowPollStopsAfterThreeAttempts) {
 
 TEST(Pi18PollScheduleTest, SlowPollRefusedThreeIntervalsIsDropped) {
   Fixture f;
-  f.add(SLOW_POLL, POLLING_P006LST, PollSchedule::SLOW);
+  f.add(SLOW_POLL, POLLING_P004T, PollSchedule::SLOW);
   f.refuse_everything();
   for (int i = 0; i < 3; i++) {
     f.one_interval();
@@ -117,14 +117,14 @@ TEST(Pi18PollScheduleTest, SlowPollRefusedThreeIntervalsIsDropped) {
     f.one_interval();
     f.refuse_everything();
   }
-  f.inv.request_poll_refresh(POLLING_P006LST);
+  f.inv.request_poll_refresh(POLLING_P004T);
   f.refuse_everything();
   EXPECT_EQ(f.uart.count_sent(SLOW_POLL), sent);
 }
 
 TEST(Pi18PollScheduleTest, AnswerResetsTheFailedIntervalCount) {
   Fixture f;
-  f.add(SLOW_POLL, POLLING_P006LST, PollSchedule::SLOW);
+  f.add(SLOW_POLL, POLLING_P004T, PollSchedule::SLOW);
   f.refuse_everything();  // interval 1 refused
   f.one_interval();
   f.refuse_everything();  // interval 2 refused

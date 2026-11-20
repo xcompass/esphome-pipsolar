@@ -57,7 +57,6 @@ enum ENUMPollingCommand {
   POLLING_P005ET = 5,
   POLLING_P007PGS0 = 6,
   POLLING_P004T = 7,
-  POLLING_P006LST = 8,
   POLLING_P007ACCT = 9,
   POLLING_P007ACLT = 10,
   POLLING_P009MCHGCR = 11,
@@ -239,12 +238,6 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   PIPSOLAR_SELECT(battery_under_voltage_select, P007PIRI)
   PIPSOLAR_SELECT(battery_type_select, P007PIRI)
 
-  // LCD sleep time (^P006LST) is read slowly: it only changes when someone writes it
-  void set_lcd_sleep_time_select(PipsolarSelect *select) {
-    this->lcd_sleep_time_select_ = select;
-    this->add_polling_command_("^P006LST", POLLING_P006LST, PollSchedule::SLOW);
-  }
-
   // Inverter clock (^P004T) is read slowly, and again after every sync
   void set_inverter_time(text_sensor::TextSensor *sensor) {
     this->inverter_time_ = sensor;
@@ -352,7 +345,6 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   void handle_poll_error_(ENUMPollingCommand polling_command);
   void handle_p005gs_(const char *message);
   void handle_p007piri_(const char *message);
-  void handle_p006lst_(const char *message);
   void handle_p004t_(const char *message);
   void handle_p006mod_(const char *message);
   void handle_p007flag_(const char *message);
@@ -383,7 +375,6 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   static esphome::optional<uint16_t> parse_time_(const char *text);
   static std::vector<int> parse_current_list_(const char *message);
 
-  PipsolarSelect *lcd_sleep_time_select_{};
   text_sensor::TextSensor *inverter_time_{};
 
   void publish_mppt_status_(text_sensor::TextSensor *sensor, esphome::optional<int32_t> value);

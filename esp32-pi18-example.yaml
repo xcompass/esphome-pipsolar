@@ -400,13 +400,11 @@ select:
         "460": "46V"
         "470": "47V"
         "480": "48V"
-  # These two have built-in options and read their state back from the inverter
+  # This one has built-in options and reads its state back from the inverter
   - platform: pi18
     pipsolar_id: inverter0
     battery_type:
       name: "battery type"
-    lcd_sleep_time:
-      name: "LCD sleep time"
 
 # The output entities below and the number entities further down are alternative controls for
 # the same settings (bulk and float voltage, charging currents); use one or the other

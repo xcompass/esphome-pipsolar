@@ -652,10 +652,7 @@ class TestPi18SelectTypes:
         return pi18_select.CONFIG_SCHEMA({"pipsolar_id": "inverter0", **keys})
 
     def test_new_selects_have_built_in_maps(self):
-        config = self._validate(
-            battery_type={"name": "battery type"},
-            lcd_sleep_time={"name": "LCD sleep"},
-        )
+        config = self._validate(battery_type={"name": "battery type"})
         assert "optionsmap" not in config["battery_type"]
         battery, battery_status = pi18_select.DEFAULT_MAPS["battery_type"]
         assert battery == {
@@ -664,21 +661,6 @@ class TestPi18SelectTypes:
             "User": "^S007PBT2",
         }
         assert battery_status == {"0": "AGM", "1": "Flooded", "2": "User"}
-        lcd, lcd_status = pi18_select.DEFAULT_MAPS["lcd_sleep_time"]
-        assert lcd == {
-            "None": "^S008LST00",
-            "30 s": "^S008LST01",
-            "60 s": "^S008LST02",
-            "5 min": "^S008LST10",
-            "10 min": "^S008LST20",
-        }
-        assert lcd_status == {
-            "0": "None",
-            "1": "30 s",
-            "2": "60 s",
-            "10": "5 min",
-            "20": "10 min",
-        }
 
     def test_built_in_maps_can_be_replaced(self):
         config = self._validate(
@@ -691,14 +673,14 @@ class TestPi18SelectTypes:
         assert config["battery_type"]["optionsmap"] == {"Mine": "^S007PBT2"}
 
     def test_optionsmap_and_statusmap_come_together_on_the_new_selects(self):
-        for key in ("battery_type", "lcd_sleep_time"):
-            for only in (
-                {"optionsmap": {"Mine": "^S007PBT2"}},
-                {"statusmap": {"2": "Mine"}},
-            ):
-                with pytest.raises(cv.Invalid, match="together") as error:
-                    self._validate(**{key: {"name": _unique_name("select"), **only}})
-                assert error.value.path == [key]
+        key = "battery_type"
+        for only in (
+            {"optionsmap": {"Mine": "^S007PBT2"}},
+            {"statusmap": {"2": "Mine"}},
+        ):
+            with pytest.raises(cv.Invalid, match="together") as error:
+                self._validate(**{key: {"name": _unique_name("select"), **only}})
+            assert error.value.path == [key]
 
     def test_existing_selects_still_need_an_optionsmap(self):
         with pytest.raises(cv.Invalid, match="optionsmap"):

@@ -297,11 +297,13 @@ It shows "Unknown fault" and the number for codes neither table names.
 `ED`/`EM`/`EY`, `VFW`, `DI`, `GMN`, PIRI field 25, and the set commands `PGR`,
 `V`, `F`, `RS`, `SBT`, `PF`, `CLE` and `BST` from the table above.
 
+LCD sleep time (the `^P006LST` query and the `^S008LST` set command) isn't
+implemented either: the LV2424 refuses the query, so a write couldn't be read back.
+
 Implemented set commands:
 - The `number` platform covers `PSDV`, `MCHGV`, `BUCD`, `MCHGC` and `MUCHGC`, and
   reads `MCHGCR`/`MUCHGCR`.
-- The `select` platform sets `PBT` and `LST`, and reads `LST` with `^P006LST`
-  every 60 s.
+- The `select` platform sets `PBT`, and reads it back from PIRI.
 - The `datetime` platform sets the AC charge and output windows with `ACCT` and
   `ACLT`, and reads them with `^P007ACCT` and `^P007ACLT` every 60 s.
 - The `inverter_time` text sensor reads `T` with `^P004T` every 60 s, and the

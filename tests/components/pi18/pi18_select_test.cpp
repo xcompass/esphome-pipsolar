@@ -8,11 +8,6 @@ namespace esphome::pi18::testing {
 
 namespace {
 
-// Not captured; the format follows the vendor app (two-digit code). The length field counts the data,
-// 2 CRC bytes and the CR: 2 data digits + 3 = 005.
-constexpr const char *SYNTHETIC_P006LST_5_MIN = "^D00510";
-constexpr const char *SYNTHETIC_P006LST_NONE = "^D00500";
-
 // What the YAML built-in maps produce
 void add_battery_type_maps(PipsolarSelect &s) {
   s.add_mapping("AGM", "^S007PBT0");
@@ -21,19 +16,6 @@ void add_battery_type_maps(PipsolarSelect &s) {
   s.add_status_mapping("0", "AGM");
   s.add_status_mapping("1", "Flooded");
   s.add_status_mapping("2", "User");
-}
-
-void add_lcd_sleep_maps(PipsolarSelect &s) {
-  s.add_mapping("None", "^S008LST00");
-  s.add_mapping("30 s", "^S008LST01");
-  s.add_mapping("60 s", "^S008LST02");
-  s.add_mapping("5 min", "^S008LST10");
-  s.add_mapping("10 min", "^S008LST20");
-  s.add_status_mapping("0", "None");
-  s.add_status_mapping("1", "30 s");
-  s.add_status_mapping("2", "60 s");
-  s.add_status_mapping("10", "5 min");
-  s.add_status_mapping("20", "10 min");
 }
 
 // LV5048_P007PIRI_BANANNAJOE with battery type (field 13) 0, AGM; the length is unchanged
@@ -56,7 +38,6 @@ struct Fixture {
   FakeUart uart;
   TestablePipsolar inv;
   PipsolarSelect battery_type;
-  PipsolarSelect lcd_sleep;
   PipsolarSelect priority;
 
   Fixture() {
@@ -65,11 +46,6 @@ struct Fixture {
     this->battery_type.set_skip_unchanged(true);
     this->battery_type.traits.set_options({"AGM", "Flooded", "User"});
     add_battery_type_maps(this->battery_type);
-    this->lcd_sleep.set_parent(&this->inv);
-    this->lcd_sleep.set_skip_unchanged(true);
-    this->lcd_sleep.set_refresh_poll(POLLING_P006LST);
-    this->lcd_sleep.traits.set_options({"None", "30 s", "60 s", "5 min", "10 min"});
-    add_lcd_sleep_maps(this->lcd_sleep);
     this->priority.set_parent(&this->inv);
     this->priority.traits.set_options({"A", "B"});
     this->priority.add_mapping("A", "^S007POP0");
@@ -77,7 +53,6 @@ struct Fixture {
     this->priority.add_status_mapping("0", "A");
     this->priority.add_status_mapping("1", "B");
     this->inv.set_battery_type_select(&this->battery_type);
-    this->inv.set_lcd_sleep_time_select(&this->lcd_sleep);
     this->inv.set_output_source_priority_select(&this->priority);
   }
 
@@ -107,22 +82,6 @@ TEST(Pi18SelectTest, BatteryTypeReadFromPiri) {
   EXPECT_EQ(std::string(f.battery_type.current_option().c_str()), "User");
 }
 
-TEST(Pi18SelectTest, LcdSleepReadFromLst) {
-  Fixture f;
-  f.inv.handle_p006lst_(SYNTHETIC_P006LST_5_MIN);
-  EXPECT_EQ(std::string(f.lcd_sleep.current_option().c_str()), "5 min");
-  f.inv.handle_p006lst_(SYNTHETIC_P006LST_NONE);
-  EXPECT_EQ(std::string(f.lcd_sleep.current_option().c_str()), "None");
-}
-
-TEST(Pi18SelectTest, LcdSleepPollIsRegisteredAsSlow) {
-  Fixture f;
-  bool found = false;
-  for (size_t i = 0; i < TestablePipsolar::POLLING_COMMANDS_MAX; i++)
-    found = found || f.inv.polling_command(i) == "^P006LST";
-  EXPECT_TRUE(found);
-}
-
 TEST(Pi18SelectTest, SelectingTheCurrentOptionSendsNothing) {
   Fixture f;
   f.inv.handle_p007piri_(LV5048_P007PIRI_BANANNAJOE);
@@ -135,22 +94,6 @@ TEST(Pi18SelectTest, OtherOptionIsQueued) {
   f.inv.handle_p007piri_(LV5048_P007PIRI_BANANNAJOE);
   f.select(f.battery_type, "AGM");
   EXPECT_EQ(f.inv.queued_command(), "^S007PBT0");
-}
-
-TEST(Pi18SelectTest, NewOptionIsQueuedAndRefreshesLst) {
-  Fixture f;
-  f.inv.handle_p006lst_(SYNTHETIC_P006LST_NONE);
-  // Drain the first round of polls so the LST poll is not pending
-  f.inv.update();
-  for (int i = 0; i < 12; i++)
-    f.answer("^0");
-  const size_t before = f.uart.count_sent("^P006LST");
-  f.select(f.lcd_sleep, "5 min");
-  EXPECT_EQ(f.inv.queued_command(), "^S008LST10");
-  for (int i = 0; i < 12; i++)
-    f.answer("^1");
-  EXPECT_EQ(f.uart.count_sent("^S008LST10"), 1u);
-  EXPECT_GT(f.uart.count_sent("^P006LST"), before);
 }
 
 TEST(Pi18SelectTest, ExistingSelectsStillAlwaysWrite) {
@@ -199,22 +142,21 @@ TEST(Pi18SelectTest, InFlightReadingKeepsThePendingOption) {
 TEST(Pi18SelectTest, RefusedWriteCanBeRetriedWhileNothingHasBeenRead) {
   FakeUart uart;
   TestablePipsolar inv;
-  PipsolarSelect lcd_sleep;
+  PipsolarSelect battery_type;
   inv.set_uart_parent(&uart);
-  lcd_sleep.set_parent(&inv);
-  lcd_sleep.set_skip_unchanged(true);
-  lcd_sleep.set_refresh_poll(POLLING_P006LST);
-  lcd_sleep.traits.set_options({"None", "30 s", "60 s", "5 min", "10 min"});
-  add_lcd_sleep_maps(lcd_sleep);
-  inv.set_lcd_sleep_time_select(&lcd_sleep);
-  lcd_sleep.make_call().set_option("5 min").perform();
+  battery_type.set_parent(&inv);
+  battery_type.set_skip_unchanged(true);
+  battery_type.traits.set_options({"AGM", "Flooded", "User"});
+  add_battery_type_maps(battery_type);
+  inv.set_battery_type_select(&battery_type);
+  battery_type.make_call().set_option("AGM").perform();
   for (int i = 0; i < 12; i++) {  // every reply, the write's included, is refused
     inv.loop();
     uart.receive(inv.reply("^0"));
     inv.run(uart, 6);
   }
-  EXPECT_EQ(uart.count_sent("^S008LST10"), 1u);
-  lcd_sleep.make_call().set_option("5 min").perform();
+  EXPECT_EQ(uart.count_sent("^S007PBT0"), 1u);
+  battery_type.make_call().set_option("AGM").perform();
   EXPECT_EQ(queued_count(inv), 1u);
 }
 

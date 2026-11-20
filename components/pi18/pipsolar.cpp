@@ -639,9 +639,6 @@ void Pipsolar::handle_poll_response_(ENUMPollingCommand polling_command, const c
     case POLLING_P007PIRI:
       handle_p007piri_(message);
       break;
-    case POLLING_P006LST:
-      handle_p006lst_(message);
-      break;
     case POLLING_P004T:
       handle_p004t_(message);
       break;
@@ -682,13 +679,6 @@ void Pipsolar::handle_poll_response_(ENUMPollingCommand polling_command, const c
 
 void Pipsolar::handle_poll_error_(ENUMPollingCommand polling_command) {
   this->handle_poll_response_(polling_command, "");
-}
-
-void Pipsolar::handle_p006lst_(const char *message) {
-  size_t pos = 0;
-  skip_start_(message, &pos);
-  // The field is a two-digit code (00, 01, 02, 10, 20); read as a number so "1" works too
-  this->publish_select_(this->lcd_sleep_time_select_, this->read_int_(message, &pos));
 }
 
 void Pipsolar::handle_p004t_(const char *message) {

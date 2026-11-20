@@ -39,6 +39,8 @@ battery; 0 means "full") and the two charging currents. The voltage numbers need
 `battery_rated_voltage: 24` or `48` to pick their default ranges; `min_value`,
 `max_value` and `step` override them. A number shows what the inverter last
 reported, so it keeps the old value until the next `^P007PIRI` reply confirms a write.
+The inverter's allowed current lists are read from `^P009MCHGCR` and `^P010MUCHGCR`,
+and a current outside them is rejected.
 
 Warning: some inverters accept changes to the bulk and float voltages only while the
 battery type is "User", and answer `^0` (refused) otherwise; the number then returns to
@@ -65,9 +67,9 @@ returning to the utility at 24.0 V:
   data: {value: 24.0}
 ```
 
-The `select` platform has two types with built-in options: `battery_type` (AGM,
-Flooded, User) and `lcd_sleep_time` (None, 30 s, 60 s, 5 min, 10 min). Give them
-only a `name`; an `optionsmap` and `statusmap` replace the built-in ones. Choosing
+The `select` platform has one type with built-in options: `battery_type` (AGM,
+Flooded, User). Give it only a `name`; an `optionsmap` and `statusmap` replace the
+built-in ones. Choosing
 the option the inverter already reports sends nothing. Changing `battery_type` may
 reset the battery voltages, and the bulk and float voltages may only be writable while
 the type is "User" (see the `number` warning above).
@@ -78,8 +80,6 @@ select:
     pipsolar_id: inverter0
     battery_type:
       name: "battery type"
-    lcd_sleep_time:
-      name: "LCD sleep time"
 ```
 
 The `datetime` platform has four time entities for the AC charge window and the

@@ -11,7 +11,6 @@ from ..const import (
     CONF_CURRENT_MAX_AC_CHARGING_CURRENT,
     CONF_CURRENT_MAX_CHARGING_CURRENT,
     CONF_INPUT_VOLTAGE_RANGE,
-    CONF_LCD_SLEEP_TIME,
     CONF_MACHINE_TYPE,
     CONF_OUTPUT_SOURCE_PRIORITY,
     CONF_SOLAR_POWER_PRIORITY,
@@ -51,7 +50,6 @@ TYPES = [
     CONF_CURRENT_MAX_AC_CHARGING_CURRENT,
     CONF_BATTERY_UNDER_VOLTAGE,
     CONF_BATTERY_TYPE,
-    CONF_LCD_SLEEP_TIME,
 ]
 
 # Types that ship their option maps; a user optionsmap/statusmap replaces them.
@@ -60,16 +58,6 @@ DEFAULT_MAPS = {
     CONF_BATTERY_TYPE: (
         {"AGM": "^S007PBT0", "Flooded": "^S007PBT1", "User": "^S007PBT2"},
         {"0": "AGM", "1": "Flooded", "2": "User"},
-    ),
-    CONF_LCD_SLEEP_TIME: (
-        {
-            "None": "^S008LST00",
-            "30 s": "^S008LST01",
-            "60 s": "^S008LST02",
-            "5 min": "^S008LST10",
-            "10 min": "^S008LST20",
-        },
-        {"0": "None", "1": "30 s", "2": "60 s", "10": "5 min", "20": "10 min"},
     ),
 }
 
@@ -129,12 +117,6 @@ async def to_code(config):
                 cg.add(var.add_mapping(mappingkey, options_map[mappingkey]))
             if default_options is not None:
                 cg.add(var.set_skip_unchanged(True))
-            if type == CONF_LCD_SLEEP_TIME:
-                cg.add(
-                    var.set_refresh_poll(
-                        cg.RawExpression("esphome::pi18::POLLING_P006LST")
-                    )
-                )
             status_map = conf.get(CONF_STATUSMAP, default_status)
             if status_map is not None:
                 for mappingkey in status_map:
