@@ -376,6 +376,7 @@ select:
         "90": "90A"
   - platform: pi18
     pipsolar_id: inverter0
+    # The select, and the number with the same key below, are alternative controls for this setting
     battery_under_voltage:
       id: inverter0_battery_under_voltage_select
       name: "battery cut-off voltage"
@@ -407,6 +408,8 @@ select:
     lcd_sleep_time:
       name: "LCD sleep time"
 
+# The output entities below and the number entities further down are alternative controls for
+# the same settings (bulk and float voltage, charging currents); use one or the other
 output:
   - platform: pi18
     pipsolar_id: inverter0

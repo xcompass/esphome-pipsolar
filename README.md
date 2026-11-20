@@ -40,6 +40,11 @@ battery; 0 means "full") and the two charging currents. The voltage numbers need
 `max_value` and `step` override them. A number shows what the inverter last
 reported, so it keeps the old value until the next `^P007PIRI` reply confirms a write.
 
+Warning: some inverters accept changes to the bulk and float voltages only while the
+battery type is "User", and answer `^0` (refused) otherwise; the number then returns to
+the inverter's value. Changing the battery type may also reset the battery voltages, so
+set the type first and check the voltages afterwards.
+
 ```yaml
 number:
   - platform: pi18
@@ -60,11 +65,12 @@ returning to the utility at 24.0 V:
   data: {value: 24.0}
 ```
 
-
 The `select` platform has two types with built-in options: `battery_type` (AGM,
 Flooded, User) and `lcd_sleep_time` (None, 30 s, 60 s, 5 min, 10 min). Give them
 only a `name`; an `optionsmap` and `statusmap` replace the built-in ones. Choosing
-the option the inverter already reports sends nothing.
+the option the inverter already reports sends nothing. Changing `battery_type` may
+reset the battery voltages, and the bulk and float voltages may only be writable while
+the type is "User" (see the `number` warning above).
 
 ```yaml
 select:

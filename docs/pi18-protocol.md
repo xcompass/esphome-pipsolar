@@ -234,6 +234,7 @@ The same page also offers:
 - `SBT`;
 - `MCHGV` and `PSDV` spinners (for a 24 V bank: bulk and float 24.0–29.2 V,
   cut-off 20.4–24.0 V);
+- the `ACCT` and `ACLT` time windows;
 - the clock.
 
 The app knows about 70 more set commands (generator, second output, dry
@@ -266,11 +267,18 @@ It shows "Unknown fault" and the number for codes neither table names.
 
 ## Not implemented by this component
 
-`ED`/`EM`/`EY`, `VFW`, `DI`, `GMN`, PIRI field 25, and the set commands
-from `PGR` down in the table above, except `LST`. The `number` platform covers `PSDV`, `MCHGV`,
-`BUCD`, `MCHGC` and `MUCHGC`, and reads `MCHGCR`/`MUCHGCR`. The `select` platform
-sets `PBT` and `LST`, and reads `LST` with `^P006LST` every 60 s. The `inverter_time` text sensor
-reads `T` with `^P004T` every 60 s, and the `sync_clock` button sets the clock with `DAT`.
+`ED`/`EM`/`EY`, `VFW`, `DI`, `GMN`, PIRI field 25, and the set commands `PGR`,
+`V`, `F`, `RS`, `SBT`, `PF`, `CLE` and `BST` from the table above.
+
+Implemented set commands:
+- The `number` platform covers `PSDV`, `MCHGV`, `BUCD`, `MCHGC` and `MUCHGC`, and
+  reads `MCHGCR`/`MUCHGCR`.
+- The `select` platform sets `PBT` and `LST`, and reads `LST` with `^P006LST`
+  every 60 s.
+- The `datetime` platform sets the AC charge and output windows with `ACCT` and
+  `ACLT`, and reads them with `^P007ACCT` and `^P007ACLT` every 60 s.
+- The `inverter_time` text sensor reads `T` with `^P004T` every 60 s, and the
+  `sync_clock` button sets the clock with `DAT`.
 
 ## Source and limits
 
