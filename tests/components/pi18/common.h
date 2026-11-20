@@ -7,6 +7,8 @@
 
 namespace esphome::pi18::testing {
 
+class FakeUart;
+
 class TestablePipsolar : public Pipsolar {
  public:
   using Pipsolar::handle_p005et_;
@@ -18,7 +20,23 @@ class TestablePipsolar : public Pipsolar {
   using Pipsolar::handle_p007piri_;
   using Pipsolar::handle_poll_error_;
   using Pipsolar::parse_command_reply_;
+  using Pipsolar::add_polling_command_;
   using Pipsolar::POLLING_COMMANDS_MAX;
+
+  // Lets a test wait out a poll timeout in a few milliseconds
+  void set_command_timeout_ms(uint32_t ms) { this->command_timeout_ms_ = ms; }
+
+  // A well-formed reply: text, CRC, CR
+  std::vector<uint8_t> reply(const std::string &text) {
+    std::vector<uint8_t> bytes(text.begin(), text.end());
+    const uint16_t crc = this->pipsolar_crc_(bytes.data(), bytes.size());
+    bytes.push_back(crc >> 8);
+    bytes.push_back(crc & 0xff);
+    bytes.push_back('\r');
+    return bytes;
+  }
+
+  void run(FakeUart &uart, int loops = 6);
 
   // Registered poll command n as text, or "" when that slot is unused
   std::string polling_command(size_t n) const {
@@ -27,7 +45,7 @@ class TestablePipsolar : public Pipsolar {
   }
 
   // The command queue holds at most one entry per test; returns "" when empty
-  const std::string &queued_command() const { return this->command_queue_[0]; }
+  const std::string &queued_command(size_t n = 0) const { return this->command_queue_[n]; }
 };
 
 // switch_::Switch is abstract; tests only need publish_state()
@@ -73,5 +91,10 @@ class FakeUart : public uart::UARTComponent {
   std::deque<uint8_t> rx_;
   std::string sent_;
 };
+
+inline void TestablePipsolar::run(FakeUart &uart, int loops) {
+  for (int i = 0; i < loops; i++)
+    this->loop();
+}
 
 }  // namespace esphome::pi18::testing

@@ -3,6 +3,7 @@
 #include "esphome/core/log.h"
 #include "pipsolar_select.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 
@@ -87,6 +88,8 @@ void Pipsolar::loop() {
       }
       poll.refusals = 0;
       poll.needs_update = false;
+      poll.answered = true;
+      poll.failed_intervals = 0;
       this->state_ = STATE_POLL_CHECKED;
       return;
     } else {
@@ -137,7 +140,7 @@ void Pipsolar::loop() {
     }
   }
   if (this->state_ == STATE_COMMAND) {
-    if (millis() - this->command_start_millis_ > esphome::pi18::Pipsolar::COMMAND_TIMEOUT) {
+    if (millis() - this->command_start_millis_ > this->command_timeout_ms_) {
       const char *command = this->command_queue_[this->command_queue_position_].c_str();
       this->command_start_millis_ = millis();
       ESP_LOGD(TAG, "command %s timeout", command);
@@ -148,9 +151,12 @@ void Pipsolar::loop() {
     }
   }
   if (this->state_ == STATE_POLL) {
-    if (millis() - this->command_start_millis_ > esphome::pi18::Pipsolar::COMMAND_TIMEOUT) {
-      ESP_LOGD(TAG, "poll %s timeout", this->enabled_polling_commands_[this->last_polling_command_].command);
-      this->handle_poll_error_(this->enabled_polling_commands_[this->last_polling_command_].identifier);
+    if (millis() - this->command_start_millis_ > this->command_timeout_ms_) {
+      auto &poll = this->enabled_polling_commands_[this->last_polling_command_];
+      ESP_LOGD(TAG, "poll %s timeout", poll.command);
+      if (poll.schedule != PollSchedule::EVERY_UPDATE && ++poll.refusals >= POLL_ATTEMPTS_MAX)
+        poll.needs_update = false;
+      this->handle_poll_error_(poll.identifier);
       this->state_ = STATE_IDLE;
     }
   }
@@ -223,6 +229,7 @@ bool Pipsolar::send_next_poll_() {
     if (!this->enabled_polling_commands_[this->last_polling_command_].needs_update) {
       continue;
     }
+    this->enabled_polling_commands_[this->last_polling_command_].sent = true;
     this->state_ = STATE_POLL;
     this->command_start_millis_ = millis();
     this->empty_uart_buffer_();
@@ -724,15 +731,54 @@ void Pipsolar::dump_config() {
 }
 
 void Pipsolar::update() {
-  for (auto &enabled_polling_command : this->enabled_polling_commands_) {
-    if (enabled_polling_command.length != 0) {
-      enabled_polling_command.needs_update = true;
-      enabled_polling_command.refusals = 0;
+  const uint32_t interval_ms = std::max<uint32_t>(this->get_update_interval(), 1);
+  const uint32_t interval_updates = std::max<uint32_t>(1, SLOW_POLL_INTERVAL_MS / interval_ms);
+  const bool new_interval = ++this->updates_in_interval_ >= interval_updates;
+  if (new_interval)
+    this->updates_in_interval_ = 0;
+
+  for (auto &poll : this->enabled_polling_commands_) {
+    if (poll.length == 0)
+      continue;
+    if (poll.schedule == PollSchedule::EVERY_UPDATE) {
+      poll.needs_update = true;
+      poll.refusals = 0;
+      continue;
     }
+    if (!new_interval || poll.unsupported)
+      continue;
+    if (poll.schedule == PollSchedule::ONCE && poll.answered)
+      continue;
+    if (poll.sent && !poll.answered && ++poll.failed_intervals >= UNSUPPORTED_AFTER_INTERVALS) {
+      ESP_LOGW(TAG, "%s not supported by this inverter, no longer polled", poll.command);
+      poll.unsupported = true;
+      poll.needs_update = false;
+      continue;
+    }
+    poll.sent = false;
+    poll.answered = false;
+    poll.refusals = 0;
+    poll.needs_update = true;
   }
 }
 
-void Pipsolar::add_polling_command_(const char *command, ENUMPollingCommand polling_command) {
+PollingCommand *Pipsolar::find_polling_command_(ENUMPollingCommand id) {
+  for (auto &poll : this->enabled_polling_commands_) {
+    if (poll.length != 0 && poll.identifier == id)
+      return &poll;
+  }
+  return nullptr;
+}
+
+void Pipsolar::request_poll_refresh(ENUMPollingCommand id) {
+  PollingCommand *poll = this->find_polling_command_(id);
+  if (poll == nullptr || poll->unsupported)
+    return;
+  poll->needs_update = true;
+  poll->refusals = 0;
+}
+
+void Pipsolar::add_polling_command_(const char *command, ENUMPollingCommand id, PollSchedule schedule) {
   for (auto &enabled_polling_command : this->enabled_polling_commands_) {
     if (enabled_polling_command.length == strlen(command)) {
       uint8_t len = strlen(command);
@@ -747,7 +793,8 @@ void Pipsolar::add_polling_command_(const char *command, ENUMPollingCommand poll
         enabled_polling_command.command[i] = (uint8_t) command[i];
       }
       enabled_polling_command.errors = 0;
-      enabled_polling_command.identifier = polling_command;
+      enabled_polling_command.identifier = id;
+      enabled_polling_command.schedule = schedule;
       enabled_polling_command.length = length;
       enabled_polling_command.needs_update = true;
       return;

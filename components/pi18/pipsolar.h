@@ -22,15 +22,32 @@ enum ENUMPollingCommand {
   POLLING_P006FWS = 4,
   POLLING_P005ET = 5,
   POLLING_P007PGS0 = 6,
+  POLLING_P004T = 7,
+  POLLING_P006LST = 8,
+  POLLING_P007ACCT = 9,
+  POLLING_P007ACLT = 10,
+  POLLING_P009MCHGCR = 11,
+  POLLING_P010MUCHGCR = 12,
 };
+
+// EVERY_UPDATE polls run on each update(). SLOW polls run once per
+// SLOW_POLL_INTERVAL_MS. ONCE polls run until they are first answered.
+enum class PollSchedule : uint8_t { EVERY_UPDATE, SLOW, ONCE };
 
 struct PollingCommand {
   uint8_t *command;
   uint8_t length = 0;
   uint8_t errors;
-  uint8_t refusals = 0;  // ^0 replies since the last update or answer
+  // Refusals (^0), plus timeouts for SLOW and ONCE polls, since the last update,
+  // interval start or answer
+  uint8_t refusals = 0;
   ENUMPollingCommand identifier;
   bool needs_update;
+  PollSchedule schedule = PollSchedule::EVERY_UPDATE;
+  bool sent = false;      // sent during this interval (SLOW and ONCE)
+  bool answered = false;  // answered at least once ever (ONCE) or during this interval (SLOW)
+  uint8_t failed_intervals = 0;
+  bool unsupported = false;
 };
 
 struct QFLAGValues {
@@ -204,6 +221,10 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
 
   void queue_command(const std::string &command);
 
+  // Sends the poll again soon. Does nothing for a poll that isn't registered or
+  // that the inverter doesn't support.
+  void request_poll_refresh(ENUMPollingCommand id);
+
   // Bulk and float charge voltages (V) from the last PIRI reply or charge voltage
   // write; empty until the first PIRI reply.
   esphome::optional<float> get_battery_bulk_voltage_setting() const { return this->battery_bulk_voltage_setting_; }
@@ -223,11 +244,16 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   static const size_t PIPSOLAR_READ_BUFFER_LENGTH = 200;
   static const size_t COMMAND_QUEUE_LENGTH = 10;
   static const size_t COMMAND_TIMEOUT = 5000;
-  static const size_t POLLING_COMMANDS_MAX = 10;
+  static const size_t POLLING_COMMANDS_MAX = 16;
+  static const uint32_t SLOW_POLL_INTERVAL_MS = 60000;
+  // A SLOW or ONCE poll that fails this many intervals in a row is dropped until reboot
+  static const uint8_t UNSUPPORTED_AFTER_INTERVALS = 3;
   // Like SolarPower, a poll the inverter refuses is tried at most this often per update
   static const uint8_t POLL_ATTEMPTS_MAX = 3;
 
-  void add_polling_command_(const char *command, ENUMPollingCommand polling_command);
+  void add_polling_command_(const char *command, ENUMPollingCommand id,
+                            PollSchedule schedule = PollSchedule::EVERY_UPDATE);
+  PollingCommand *find_polling_command_(ENUMPollingCommand id);
   void empty_uart_buffer_();
   uint8_t check_incoming_crc_();
   // Reply to a ^S set command: 1 accepted (^1), 0 refused (^0), -1 not a valid reply
@@ -274,7 +300,9 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   size_t read_pos_{0};
 
   uint32_t command_start_millis_ = 0;
-  uint8_t state_;
+  uint32_t command_timeout_ms_ = COMMAND_TIMEOUT;  // only tests change it
+  uint32_t updates_in_interval_ = 0;
+  uint8_t state_ = 0;  // STATE_IDLE
   enum State {
     STATE_IDLE = 0,
     STATE_POLL = 1,
