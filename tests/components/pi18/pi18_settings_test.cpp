@@ -8,11 +8,12 @@ namespace esphome::pi18::testing {
 namespace {
 
 // Not captured from an inverter: a synthetic ^P010MUCHGCR reply (allowed AC charging currents,
-// 3-digit amps). 4 values of 3 digits and 3 commas = 15 bytes, plus the 3-digit length itself.
+// 3-digit amps). 4 values of 3 digits and 3 commas = 15 data bytes; the length field counts the data,
+// 2 CRC bytes and the CR: 15 + 3 = 018.
 constexpr const char *SYNTHETIC_P010MUCHGCR = "^D018010,020,030,040";
 
 // LV5048_P007PIRI_BANANNAJOE with the battery cut-off (field 10) changed from 48.0 V to 47.5 V.
-// Same length, so the length field is unchanged.
+// Same length, so the length field (data + 2 CRC bytes + CR = 89) is unchanged.
 constexpr const char *PIRI_CUT_OFF_475 =
     "^D0892300,243,2300,500,243,5600,5600,480,500,520,475,554,540,2,010,060,0,0,2,9,1,0,0,0,1,00";
 

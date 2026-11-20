@@ -8,7 +8,8 @@ namespace esphome::pi18::testing {
 
 namespace {
 
-// Not captured; the format follows the vendor app (two-digit code). Length 005 covers "^D" + 3 digits + code.
+// Not captured; the format follows the vendor app (two-digit code). The length field counts the data,
+// 2 CRC bytes and the CR: 2 data digits + 3 = 005.
 constexpr const char *SYNTHETIC_P006LST_5_MIN = "^D00510";
 constexpr const char *SYNTHETIC_P006LST_NONE = "^D00500";
 
@@ -170,19 +171,51 @@ TEST(Pi18SelectTest, RevertBeforeReadingIsSent) {
 }
 
 TEST(Pi18SelectTest, InFlightReadingKeepsThePendingOption) {
-  Fixture f;
-  f.inv.handle_p007piri_(LV5048_P007PIRI_BANANNAJOE);  // User
-  f.inv.loop();                                        // PIRI sent, reply not yet read
-  f.select(f.battery_type, "AGM");
-  f.uart.receive(f.inv.reply(LV5048_P007PIRI_BANANNAJOE));  // the old reading arrives
-  f.inv.run(f.uart, 6);                                     // ... and the write is sent
-  f.uart.receive(f.inv.reply("^1"));
-  f.inv.run(f.uart, 6);
-  EXPECT_EQ(f.uart.count_sent("^S007PBT0"), 1u);
+  // Only PIRI is registered, so the poll in flight is PIRI and its reply reaches the battery type select
+  FakeUart uart;
+  TestablePipsolar inv;
+  PipsolarSelect battery_type;
+  inv.set_uart_parent(&uart);
+  battery_type.set_parent(&inv);
+  battery_type.set_skip_unchanged(true);
+  battery_type.traits.set_options({"AGM", "Flooded", "User"});
+  add_battery_type_maps(battery_type);
+  inv.set_battery_type_select(&battery_type);
+  inv.handle_p007piri_(LV5048_P007PIRI_BANANNAJOE);  // User
+  inv.loop();                                        // PIRI sent, reply not yet read
+  ASSERT_EQ(uart.count_sent("^P007PIRI"), 1u);
+  battery_type.make_call().set_option("AGM").perform();
+  uart.receive(inv.reply(LV5048_P007PIRI_BANANNAJOE));  // the old reading arrives
+  inv.run(uart, 6);                                     // ... and the write is sent
+  uart.receive(inv.reply("^1"));
+  inv.run(uart, 6);
+  EXPECT_EQ(uart.count_sent("^S007PBT0"), 1u);
   // The select shows the inverter's reading, but the pending write is still the known value
-  EXPECT_EQ(std::string(f.battery_type.current_option().c_str()), "User");
-  f.select(f.battery_type, "AGM");
-  EXPECT_EQ(queued_count(f.inv), 0u);
+  EXPECT_EQ(std::string(battery_type.current_option().c_str()), "User");
+  battery_type.make_call().set_option("AGM").perform();
+  EXPECT_EQ(queued_count(inv), 0u);
+}
+
+TEST(Pi18SelectTest, RefusedWriteCanBeRetriedWhileNothingHasBeenRead) {
+  FakeUart uart;
+  TestablePipsolar inv;
+  PipsolarSelect lcd_sleep;
+  inv.set_uart_parent(&uart);
+  lcd_sleep.set_parent(&inv);
+  lcd_sleep.set_skip_unchanged(true);
+  lcd_sleep.set_refresh_poll(POLLING_P006LST);
+  lcd_sleep.traits.set_options({"None", "30 s", "60 s", "5 min", "10 min"});
+  add_lcd_sleep_maps(lcd_sleep);
+  inv.set_lcd_sleep_time_select(&lcd_sleep);
+  lcd_sleep.make_call().set_option("5 min").perform();
+  for (int i = 0; i < 12; i++) {  // every reply, the write's included, is refused
+    inv.loop();
+    uart.receive(inv.reply("^0"));
+    inv.run(uart, 6);
+  }
+  EXPECT_EQ(uart.count_sent("^S008LST10"), 1u);
+  lcd_sleep.make_call().set_option("5 min").perform();
+  EXPECT_EQ(queued_count(inv), 1u);
 }
 
 TEST(Pi18SelectTest, RefusedSelectWriteReverts) {

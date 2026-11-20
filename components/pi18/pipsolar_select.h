@@ -16,7 +16,7 @@ class PipsolarSelect : public Component, public select::Select {
   void set_optimistic(bool optimistic) { this->optimistic_ = optimistic; }
   void add_mapping(const std::string &key, std::string value) { this->mapping_[key] = std::move(value); }
   void add_status_mapping(const std::string &key, std::string value) { this->status_mapping_[key] = std::move(value); }
-  // Skip a write when the option is already the one the inverter reported
+  // Skip a write when the option is already the one the inverter reported or the one just written
   void set_skip_unchanged(bool skip) { this->skip_unchanged_ = skip; }
   // Poll to send again after a write, so the select shows the new reading soon
   void set_refresh_poll(ENUMPollingCommand poll) {

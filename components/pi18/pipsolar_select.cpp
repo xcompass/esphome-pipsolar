@@ -32,7 +32,8 @@ void PipsolarSelect::control(const std::string &value) {
   }
   if (this->has_refresh_poll_)
     this->parent_->request_poll_refresh(this->refresh_poll_);
-  if (this->skip_unchanged_)
+  // With no reading yet nothing can confirm or revert a pending option, so a refused write could never be retried
+  if (this->skip_unchanged_ && !this->last_reading_.empty())
     this->pending_ = value;
   if (this->optimistic_)
     this->publish_state(value);
