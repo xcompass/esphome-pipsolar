@@ -195,6 +195,33 @@ models.
 | `ACCT`, `ACLT` | AC charge start and end time; AC output start and end time, each `HHMM` |
 | `LOADPR` | Load 1 VA, load 1 W, load 2 VA, load 2 W (for models with a second output) |
 
+## Queries probed on the LV2424
+
+On 2026-11-20 a read-only probe sent each of these queries to an LV2424 three
+times, 5 s apart. Every reply passed its CRC, and the three replies to a query
+matched (apart from the clock).
+
+| Query | Result | Reply data |
+|---|---|---|
+| `^P004T` | Verified | `^D017` + `yyyyMMddHHmmss`, e.g. `^D01720261120130618` |
+| `^P006LST` | Refused | `^0` all three times |
+| `^P007ACCT` | Verified | `^D012` + `hhmm,hhmm`; read `0000,0000` |
+| `^P007ACLT` | Verified | `^D012` + `hhmm,hhmm`; read `0000,0000` |
+| `^P009MCHGCR` | Verified | `^D058` + 14 values: `010,020,030,040,050,060,070,080,090,100,110,120,130,140` |
+| `^P010MUCHGCR` | Verified | `^D030` + 7 values: `002,010,020,030,040,050,060` |
+
+- **Allowed currents:** max charging 10 to 140 A in steps of 10; max AC
+  charging 2 A, then 10 to 60 A in steps of 10.
+- **`ACCT`/`ACLT`:** both read `0000,0000`, which is the inverter's factory
+  value. What an equal start and end means (always on, or never) isn't
+  verified. The component publishes 00:00 for both ends.
+- **`LST`:** the LV2424 refuses the query, so the LCD sleep time can't be read
+  back.
+- **Clock:** the inverter clock read 13:06:18 when the ESP32's clock read
+  13:36:50, so it was about 30 minutes behind. That is why the component has
+  the `sync_clock` button.
+- **`PIRI`:** the probe didn't capture the boot-time `^P007PIRI` reply.
+
 ## Set commands
 
 Payloads follow `^Snnn`. Values marked ×10 are sent in tenths.

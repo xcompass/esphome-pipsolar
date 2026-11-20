@@ -1,16 +1,12 @@
 #include <gtest/gtest.h>
 #include <string>
 #include "common.h"
+#include "frames_lv2424.h"
 #include "frames_lv5048.h"
 
 namespace esphome::pi18::testing {
 
 namespace {
-
-// Not captured from an inverter: a synthetic ^P010MUCHGCR reply (allowed AC charging currents,
-// 3-digit amps). 4 values of 3 digits and 3 commas = 15 data bytes; the length field counts the data,
-// 2 CRC bytes and the CR: 15 + 3 = 018.
-constexpr const char *SYNTHETIC_P010MUCHGCR = "^D018010,020,030,040";
 
 // LV5048_P007PIRI_BANANNAJOE with the battery cut-off (field 10) changed from 48.0 V to 47.5 V.
 // Same length, so the length field (data + 2 CRC bytes + CR = 89) is unchanged.
@@ -135,8 +131,8 @@ TEST(Pi18SettingsTest, PairWithUnknownPartnerIsRejected) {
 TEST(Pi18SettingsTest, CurrentNotInAllowedListIsRejected) {
   TestablePipsolar inv;
   read_piri(inv);
-  inv.handle_p009mchgcr_(LV5048_P009MCHGCR);
-  EXPECT_EQ(inv.get_allowed_currents(NumberSetting::MAX_CHARGING_CURRENT).size(), 12u);
+  inv.handle_p009mchgcr_(LV2424_P009MCHGCR);
+  EXPECT_EQ(inv.get_allowed_currents(NumberSetting::MAX_CHARGING_CURRENT).size(), 14u);
   EXPECT_EQ(inv.write_number_setting(NumberSetting::MAX_CHARGING_CURRENT, 65.0f), WriteResult::REJECTED);
   EXPECT_EQ(inv.queued_command(), "");
   EXPECT_EQ(inv.write_number_setting(NumberSetting::MAX_CHARGING_CURRENT, 70.0f), WriteResult::QUEUED);
@@ -146,10 +142,12 @@ TEST(Pi18SettingsTest, CurrentNotInAllowedListIsRejected) {
 TEST(Pi18SettingsTest, AcChargingListComesFromItsOwnReply) {
   TestablePipsolar inv;
   read_piri(inv);
-  inv.handle_p010muchgcr_(SYNTHETIC_P010MUCHGCR);
+  inv.handle_p010muchgcr_(LV2424_P010MUCHGCR);
   const auto &list = inv.get_allowed_currents(NumberSetting::MAX_AC_CHARGING_CURRENT);
-  ASSERT_EQ(list.size(), 4u);
-  EXPECT_EQ(list[0], 10);
+  ASSERT_EQ(list.size(), 7u);
+  EXPECT_EQ(list[0], 2);
+  EXPECT_EQ(list[1], 10);
+  EXPECT_EQ(list[6], 60);
   EXPECT_TRUE(inv.get_allowed_currents(NumberSetting::MAX_CHARGING_CURRENT).empty());
   EXPECT_EQ(inv.write_number_setting(NumberSetting::MAX_AC_CHARGING_CURRENT, 25.0f), WriteResult::REJECTED);
   EXPECT_EQ(inv.write_number_setting(NumberSetting::MAX_AC_CHARGING_CURRENT, 30.0f), WriteResult::QUEUED);
@@ -157,9 +155,9 @@ TEST(Pi18SettingsTest, AcChargingListComesFromItsOwnReply) {
 
 TEST(Pi18SettingsTest, EmptyAllowedListReplyLeavesTheListUnchanged) {
   TestablePipsolar inv;
-  inv.handle_p009mchgcr_(LV5048_P009MCHGCR);
+  inv.handle_p009mchgcr_(LV2424_P009MCHGCR);
   inv.handle_p009mchgcr_("");
-  EXPECT_EQ(inv.get_allowed_currents(NumberSetting::MAX_CHARGING_CURRENT).size(), 12u);
+  EXPECT_EQ(inv.get_allowed_currents(NumberSetting::MAX_CHARGING_CURRENT).size(), 14u);
 }
 
 TEST(Pi18SettingsTest, CurrentAllowedWhileListUnknown) {

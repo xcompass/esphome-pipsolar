@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <string>
 #include "common.h"
+#include "frames_lv2424.h"
 #include "frames_lv5048.h"
 
 namespace esphome::pi18::testing {
@@ -37,6 +38,14 @@ TEST(Pi18ClockTest, InverterTimeIsFormatted) {
   inv.set_inverter_time(&clock);
   inv.handle_p004t_(LV5048_P004T);
   EXPECT_STREQ(clock.state.c_str(), "2023-03-20 11:46:13");
+}
+
+TEST(Pi18ClockTest, Lv2424InverterTimeIsFormatted) {
+  TestablePipsolar inv;
+  text_sensor::TextSensor clock;
+  inv.set_inverter_time(&clock);
+  inv.handle_p004t_(LV2424_P004T);
+  EXPECT_STREQ(clock.state.c_str(), "2026-11-20 13:06:18");
 }
 
 TEST(Pi18ClockTest, PollErrorKeepsTheLastTime) {

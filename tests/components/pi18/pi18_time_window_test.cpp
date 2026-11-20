@@ -2,6 +2,7 @@
 #include <string>
 #include "common.h"
 #include "esphome/components/pi18/pipsolar_time.h"
+#include "frames_lv2424.h"
 #include "frames_lv5048.h"
 
 namespace esphome::pi18::testing {
@@ -42,11 +43,29 @@ TEST(Pi18TimeWindowTest, WindowsReadFromAcctAndAclt) {
   TestablePipsolar inv;
   EXPECT_FALSE(inv.get_time_setting(TimeWindowEnd::AC_CHARGE_START).has_value());
   inv.handle_p007acct_(SYNTHETIC_WINDOW_2300_0600);
-  inv.handle_p007aclt_(LV5048_P005ACLT);  // captured: 00:00 to 00:00
+  inv.handle_p007aclt_(LV2424_P007ACLT);  // captured: 00:00 to 00:00
   EXPECT_EQ(*inv.get_time_setting(TimeWindowEnd::AC_CHARGE_START), 2300);
   EXPECT_EQ(*inv.get_time_setting(TimeWindowEnd::AC_CHARGE_END), 600);
   EXPECT_EQ(*inv.get_time_setting(TimeWindowEnd::AC_OUTPUT_START), 0);
   EXPECT_EQ(*inv.get_time_setting(TimeWindowEnd::AC_OUTPUT_END), 0);
+}
+
+TEST(Pi18TimeWindowTest, FactoryZeroWindowsPublishMidnightForBothEnds) {
+  TestablePipsolar inv;
+  PipsolarTime start, end;
+  start.set_parent(&inv);
+  start.set_window_end(TimeWindowEnd::AC_CHARGE_START);
+  end.set_parent(&inv);
+  end.set_window_end(TimeWindowEnd::AC_CHARGE_END);
+  inv.set_time_window_end(TimeWindowEnd::AC_CHARGE_START, &start);
+  inv.set_time_window_end(TimeWindowEnd::AC_CHARGE_END, &end);
+  inv.handle_p007acct_(LV2424_P007ACCT);
+  EXPECT_TRUE(start.has_state());
+  EXPECT_TRUE(end.has_state());
+  EXPECT_EQ(start.hour, 0);
+  EXPECT_EQ(start.minute, 0);
+  EXPECT_EQ(end.hour, 0);
+  EXPECT_EQ(end.minute, 0);
 }
 
 TEST(Pi18TimeWindowTest, EntitiesShowTheReading) {

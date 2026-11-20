@@ -2,6 +2,7 @@
 #include <string>
 #include "common.h"
 #include "esphome/components/pi18/pipsolar_number.h"
+#include "frames_lv2424.h"
 #include "frames_lv5048.h"
 
 namespace esphome::pi18::testing {
@@ -99,7 +100,7 @@ TEST(Pi18NumberTest, UnchangedValueKeepsState) {
 TEST(Pi18NumberTest, HubRejectionSnapsBackToTheReading) {
   // 65 A is on the step and in range, but not in the inverter's list of allowed currents
   NumberFixture f(NumberSetting::MAX_CHARGING_CURRENT, 10.0f, 90.0f, 5.0f);
-  f.inv.handle_p009mchgcr_(LV5048_P009MCHGCR);
+  f.inv.handle_p009mchgcr_(LV2424_P009MCHGCR);
   f.number.publish_state(30.0f);  // as if the UI had moved it
   f.set(65.0f);
   EXPECT_EQ(f.inv.queued_command(), "");
