@@ -24,7 +24,12 @@ void PipsolarSelect::control(const std::string &value) {
     return;
   }
   ESP_LOGD(TAG, "found mapped option %s for option %s", it->second.c_str(), value.c_str());
-  this->parent_->queue_command(it->second);
+  if (!this->parent_->queue_command(it->second)) {
+    ESP_LOGW(TAG, "command queue full, option %s not sent", value.c_str());
+    if (!this->last_reading_.empty())
+      this->publish_state(this->last_reading_);
+    return;
+  }
   if (this->has_refresh_poll_)
     this->parent_->request_poll_refresh(this->refresh_poll_);
   if (this->skip_unchanged_)

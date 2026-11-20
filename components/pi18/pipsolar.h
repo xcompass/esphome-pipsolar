@@ -251,7 +251,8 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   PIPSOLAR_SWITCH(alarm_on_when_primary_source_interrupt_switch, P007FLAG)
   PIPSOLAR_SWITCH(fault_code_record_switch, P007FLAG)
 
-  void queue_command(const std::string &command);
+  // False when the queue was full and the command was dropped
+  bool queue_command(const std::string &command);
 
   // Any command queued, or one being sent or answered
   bool write_outstanding() const;
@@ -346,6 +347,14 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   // value, unless a write to it is still outstanding.
   void apply_reading_(NumberSetting setting, esphome::optional<int32_t> raw, float divisor);
   void set_known_(NumberSetting setting, float value);
+  // A reading doesn't replace the known value of a setting whose write is pending and still outstanding,
+  // since the reading may predate the write
+  bool keeps_pending_(bool pending) const;
+  // The known value becomes a write the inverter hasn't confirmed by a reading
+  template<typename State, typename Value> static void set_pending_(State &state, Value value) {
+    state.value = value;
+    state.pending = true;
+  }
   // Publishes a window reading to both ends; it becomes the known value unless a write is outstanding
   void apply_time_window_(TimeWindowEnd start, uint16_t start_time, uint16_t end_time);
   void handle_time_window_(TimeWindowEnd start, const char *message);

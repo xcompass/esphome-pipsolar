@@ -38,6 +38,21 @@ struct Fixture {
 // PIRI known without a loop; registers nothing
 void read_piri(TestablePipsolar &inv) { inv.handle_p007piri_(LV5048_P007PIRI_BANANNAJOE); }
 
+// Fills every slot of the command queue with an unrelated command
+void fill_queue(TestablePipsolar &inv) {
+  for (int i = 0; i < 10; i++)
+    EXPECT_TRUE(inv.queue_command("^S000FILL"));
+  EXPECT_FALSE(inv.queue_command("^S000DROPPED"));
+}
+
+// Sends everything queued, each answered with ^1
+void drain_queue(TestablePipsolar &inv, FakeUart &uart) {
+  for (int i = 0; i < 40; i++) {
+    inv.loop();
+    uart.receive(inv.reply("^1"));
+    inv.run(uart, 6);
+  }
+}
 }  // namespace
 
 TEST(Pi18SettingsTest, PiriSetsKnownValues) {
@@ -226,6 +241,18 @@ TEST(Pi18SettingsTest, PartnerOutsideTheEncodableRangeIsRejected) {
   inv.handle_p007piri_("^D0902300,243,2300,500,243,5600,5600,480,500,1200,480,554,540,2,010,060,0,0,2,9,1,0,0,0,1,00");
   EXPECT_EQ(inv.write_number_setting(NumberSetting::BATTERY_RECHARGE_VOLTAGE, 49.0f), WriteResult::REJECTED);
   EXPECT_EQ(inv.queued_command(), "");
+}
+
+TEST(Pi18SettingsTest, FullQueueRejectsANumberWriteWithoutPending) {
+  FakeUart uart;
+  TestablePipsolar inv;
+  inv.set_uart_parent(&uart);
+  read_piri(inv);
+  fill_queue(inv);
+  EXPECT_EQ(inv.write_number_setting(NumberSetting::BATTERY_UNDER_VOLTAGE, 47.5f), WriteResult::REJECTED);
+  EXPECT_NEAR(*inv.get_number_setting(NumberSetting::BATTERY_UNDER_VOLTAGE), 48.0f, 0.01f);
+  drain_queue(inv, uart);
+  EXPECT_EQ(inv.write_number_setting(NumberSetting::BATTERY_UNDER_VOLTAGE, 47.5f), WriteResult::QUEUED);
 }
 
 }  // namespace esphome::pi18::testing

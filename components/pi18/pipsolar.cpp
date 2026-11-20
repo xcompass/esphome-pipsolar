@@ -251,17 +251,18 @@ bool Pipsolar::send_next_poll_() {
   return false;
 }
 
-void Pipsolar::queue_command(const std::string &command) {
+bool Pipsolar::queue_command(const std::string &command) {
   uint8_t next_position = command_queue_position_;
   for (uint8_t i = 0; i < COMMAND_QUEUE_LENGTH; i++) {
     uint8_t testposition = (next_position + i) % COMMAND_QUEUE_LENGTH;
     if (command_queue_[testposition].empty()) {
       command_queue_[testposition] = command;
       ESP_LOGD(TAG, "Command queued successfully: %s at position %d", command.c_str(), testposition);
-      return;
+      return true;
     }
   }
   ESP_LOGD(TAG, "Command queue full dropping command: %s", command.c_str());
+  return false;
 }
 
 std::string Pipsolar::charge_voltage_command(float bulk_voltage, float float_voltage) {
@@ -282,7 +283,8 @@ bool Pipsolar::set_charge_voltages(float bulk_voltage, float float_voltage) {
   const std::string command = charge_voltage_command(bulk_voltage, float_voltage);
   if (command.empty())
     return false;
-  this->queue_command(command);
+  if (!this->queue_command(command))
+    return false;
   // Assume the write succeeds; the next PIRI reply corrects this if the inverter refused it
   this->set_known_(NumberSetting::BATTERY_BULK_VOLTAGE, bulk_voltage);
   this->set_known_(NumberSetting::BATTERY_FLOAT_VOLTAGE, float_voltage);
@@ -408,10 +410,10 @@ const std::vector<int> &Pipsolar::get_allowed_currents(NumberSetting setting) co
 }
 
 void Pipsolar::set_known_(NumberSetting setting, float value) {
-  auto &state = this->numbers_[static_cast<size_t>(setting)];
-  state.value = value;
-  state.pending = true;
+  set_pending_(this->numbers_[static_cast<size_t>(setting)], value);
 }
+
+bool Pipsolar::keeps_pending_(bool pending) const { return pending && this->write_outstanding(); }
 
 bool Pipsolar::write_outstanding() const {
   if (this->state_ == STATE_COMMAND || this->state_ == STATE_COMMAND_COMPLETE)
@@ -430,7 +432,7 @@ void Pipsolar::apply_reading_(NumberSetting setting, esphome::optional<int32_t> 
   if (state.entity != nullptr)
     state.entity->publish_state(reading);
   // A reading taken before a write went out would undo it
-  if (state.pending && this->write_outstanding())
+  if (this->keeps_pending_(state.pending))
     return;
   state.value = reading;
   state.pending = false;
@@ -470,18 +472,15 @@ WriteResult Pipsolar::write_number_setting(NumberSetting setting, float value) {
     }
   }
 
-  const bool queue_has_room = std::any_of(std::begin(this->command_queue_), std::end(this->command_queue_),
-                                          [](const std::string &command) { return command.empty(); });
-  if (!queue_has_room) {
-    ESP_LOGW(TAG, "%s: command queue full", name);
-    return WriteResult::REJECTED;
-  }
   const std::string command = set_command(setting, units, partner_units);
   if (command.empty()) {
     ESP_LOGW(TAG, "%s: no set command", name);
     return WriteResult::REJECTED;
   }
-  this->queue_command(command);
+  if (!this->queue_command(command)) {
+    ESP_LOGW(TAG, "%s: command queue full", name);
+    return WriteResult::REJECTED;
+  }
   this->set_known_(setting, is_current(setting) ? static_cast<float>(units) : units * 0.1f);
   if (partner != setting)
     this->set_known_(partner, *this->get_number_setting(partner));
@@ -543,7 +542,7 @@ void Pipsolar::apply_time_window_(TimeWindowEnd start, uint16_t start_time, uint
       state.entity->publish_time(readings[i] / 100, readings[i] % 100);
 #endif
     // A reading taken before a write went out would undo it
-    if (state.pending && this->write_outstanding())
+    if (this->keeps_pending_(state.pending))
       continue;
     state.value = readings[i];
     state.pending = false;
@@ -591,23 +590,17 @@ WriteResult Pipsolar::write_time_setting(TimeWindowEnd end, uint8_t hour, uint8_
     ESP_LOGW(TAG, "The other end of the window isn't known yet");
     return WriteResult::REJECTED;
   }
-  const bool queue_has_room = std::any_of(std::begin(this->command_queue_), std::end(this->command_queue_),
-                                          [](const std::string &command) { return command.empty(); });
-  if (!queue_has_room) {
-    ESP_LOGW(TAG, "Command queue full");
-    return WriteResult::REJECTED;
-  }
   const uint16_t start_time = end == start ? time : *partner_known;
   const uint16_t end_time = end == start ? *partner_known : time;
   char command[32];
   snprintf(command, sizeof(command), "^S016%s%04u,%04u", is_charge_window(end) ? "ACCT" : "ACLT",
            static_cast<unsigned>(start_time), static_cast<unsigned>(end_time));
-  this->queue_command(command);
-  for (TimeWindowEnd written : {end, partner}) {
-    auto &state = this->times_[static_cast<size_t>(written)];
-    state.value = written == end ? time : *partner_known;
-    state.pending = true;
+  if (!this->queue_command(command)) {
+    ESP_LOGW(TAG, "Command queue full");
+    return WriteResult::REJECTED;
   }
+  set_pending_(this->times_[static_cast<size_t>(end)], time);
+  set_pending_(this->times_[static_cast<size_t>(partner)], *partner_known);
   this->request_poll_refresh(window_poll(end));
   return WriteResult::QUEUED;
 }

@@ -90,6 +90,13 @@ struct Fixture {
   }
 };
 
+// Fills every slot of the command queue with an unrelated command
+void fill_queue(TestablePipsolar &inv) {
+  for (int i = 0; i < 10; i++)
+    EXPECT_TRUE(inv.queue_command("^S000FILL"));
+  EXPECT_FALSE(inv.queue_command("^S000DROPPED"));
+}
+
 }  // namespace
 
 TEST(Pi18SelectTest, BatteryTypeReadFromPiri) {
@@ -189,6 +196,21 @@ TEST(Pi18SelectTest, RefusedSelectWriteReverts) {
   f.inv.handle_p007piri_(LV5048_P007PIRI_BANANNAJOE);  // the next reading: still User
   f.select(f.battery_type, "AGM");
   EXPECT_EQ(queued_count(f.inv), 1u);
+}
+
+TEST(Pi18SelectTest, FullQueueDoesNotMarkTheOptionPending) {
+  Fixture f;
+  f.inv.handle_p007piri_(LV5048_P007PIRI_BANANNAJOE);  // User
+  fill_queue(f.inv);
+  f.select(f.battery_type, "AGM");
+  EXPECT_EQ(std::string(f.battery_type.current_option().c_str()), "User");
+  for (int i = 0; i < 40; i++)
+    f.answer("^1");  // drains the queue
+  EXPECT_EQ(f.uart.count_sent("^S007PBT0"), 0u);
+  f.select(f.battery_type, "AGM");  // not "already selected": the first write never queued
+  for (int i = 0; i < 12; i++)
+    f.answer("^1");
+  EXPECT_EQ(f.uart.count_sent("^S007PBT0"), 1u);
 }
 
 }  // namespace esphome::pi18::testing

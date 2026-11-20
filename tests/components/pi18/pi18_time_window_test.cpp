@@ -21,6 +21,21 @@ size_t queued_count(const TestablePipsolar &inv) {
   return count;
 }
 
+// Fills every slot of the command queue with an unrelated command
+void fill_queue(TestablePipsolar &inv) {
+  for (int i = 0; i < 10; i++)
+    EXPECT_TRUE(inv.queue_command("^S000FILL"));
+  EXPECT_FALSE(inv.queue_command("^S000DROPPED"));
+}
+
+// Sends everything queued, each answered with ^1
+void drain_queue(TestablePipsolar &inv, FakeUart &uart) {
+  for (int i = 0; i < 40; i++) {
+    inv.loop();
+    uart.receive(inv.reply("^1"));
+    inv.run(uart, 6);
+  }
+}
 }  // namespace
 
 TEST(Pi18TimeWindowTest, WindowsReadFromAcctAndAclt) {
@@ -197,6 +212,18 @@ TEST(Pi18TimeWindowTest, WriteRefreshesThePoll) {
   }
   EXPECT_EQ(uart.count_sent("^S016ACCT2230,0600"), 1u);
   EXPECT_GT(uart.count_sent("^P007ACCT"), before);
+}
+
+TEST(Pi18TimeWindowTest, FullQueueRejectsAWriteWithoutPending) {
+  FakeUart uart;
+  TestablePipsolar inv;
+  inv.set_uart_parent(&uart);
+  inv.handle_p007acct_(SYNTHETIC_WINDOW_2300_0600);
+  fill_queue(inv);
+  EXPECT_EQ(inv.write_time_setting(TimeWindowEnd::AC_CHARGE_START, 22, 30), WriteResult::REJECTED);
+  EXPECT_EQ(*inv.get_time_setting(TimeWindowEnd::AC_CHARGE_START), 2300);
+  drain_queue(inv, uart);
+  EXPECT_EQ(inv.write_time_setting(TimeWindowEnd::AC_CHARGE_START, 22, 30), WriteResult::QUEUED);
 }
 
 }  // namespace esphome::pi18::testing
