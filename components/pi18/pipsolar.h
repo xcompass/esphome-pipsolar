@@ -9,6 +9,7 @@
 #include "esphome/core/automation.h"
 #include "esphome/core/component.h"
 #include "esphome/core/helpers.h"
+#include "esphome/core/time.h"
 
 #include <vector>
 
@@ -236,6 +237,18 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
     this->add_polling_command_("^P006LST", POLLING_P006LST, PollSchedule::SLOW);
   }
 
+  // Inverter clock (^P004T) is read slowly, and again after every sync
+  void set_inverter_time(text_sensor::TextSensor *sensor) {
+    this->inverter_time_ = sensor;
+    this->add_polling_command_("^P004T", POLLING_P004T, PollSchedule::SLOW);
+  }
+
+  // "^S018DATyyMMddHHmmss" for a local time; empty when the time isn't valid
+  static std::string clock_command(const ESPTime &now);
+  // Queues the clock command and refreshes the clock reading. False when the time isn't
+  // valid or the queue was full, with nothing sent.
+  bool sync_clock(const ESPTime &now);
+
   // Switches — on/off commands are full ^S<len><cmd> strings
   PIPSOLAR_SWITCH(output_source_priority_switch, P007PIRI)
   PIPSOLAR_SWITCH(solar_power_priority_switch, P007PIRI)
@@ -332,6 +345,7 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   void handle_p005gs_(const char *message);
   void handle_p007piri_(const char *message);
   void handle_p006lst_(const char *message);
+  void handle_p004t_(const char *message);
   void handle_p006mod_(const char *message);
   void handle_p007flag_(const char *message);
   void handle_p006fws_(const char *message);
@@ -362,6 +376,7 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   static std::vector<int> parse_current_list_(const char *message);
 
   PipsolarSelect *lcd_sleep_time_select_{};
+  text_sensor::TextSensor *inverter_time_{};
 
   void publish_mppt_status_(text_sensor::TextSensor *sensor, esphome::optional<int32_t> value);
   void publish_direction_(text_sensor::TextSensor *sensor, esphome::optional<int32_t> value);

@@ -93,6 +93,32 @@ datetime:
       name: "AC charge end time"
 ```
 
+The inverter clock has two entities. The `inverter_time` text sensor
+(`text_sensor` platform) shows the inverter's date and time as `YYYY-MM-DD HH:MM:SS`,
+read once a minute. The `sync_clock` button (`button` platform) sets the inverter
+clock to the local time of an ESPHome `time` component, given as `time_id`, and then
+reads the clock again. It does nothing but log a warning while the time source isn't
+valid yet. The inverter never changes its clock by itself, so a Home Assistant
+automation that presses the button keeps it right, for example every night:
+
+```yaml
+time:
+  - platform: homeassistant
+    id: ha_time
+
+button:
+  - platform: pi18
+    pipsolar_id: inverter0
+    sync_clock:
+      name: "sync clock"
+      time_id: ha_time
+```
+
+```yaml
+- trigger: {trigger: time, at: "03:00:00"}
+  action: {action: button.press, target: {entity_id: button.mppsolar_sync_clock}}
+```
+
 ## Requirements
 
 * [ESPHome 2026.3.0 or higher](https://github.com/esphome/esphome/releases).

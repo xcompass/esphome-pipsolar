@@ -3,6 +3,7 @@ from esphome.components import text_sensor
 import esphome.config_validation as cv
 
 from .. import CONF_PIPSOLAR_ID, PIPSOLAR_COMPONENT_SCHEMA
+from ..const import CONF_INVERTER_TIME
 
 DEPENDENCIES = ["uart"]
 
@@ -37,6 +38,7 @@ TYPES = [
     CONF_LINE_POWER_DIRECTION,
     CONF_DEVICE_MODE,
     CONF_FAULT_DESCRIPTION,
+    CONF_INVERTER_TIME,
     CONF_LAST_P005GS,
     CONF_LAST_P007PIRI,
     CONF_LAST_P006MOD,

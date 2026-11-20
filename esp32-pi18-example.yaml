@@ -169,6 +169,9 @@ sensor:
 text_sensor:
   - platform: pi18
     pipsolar_id: inverter0
+    # ^P004T, read once a minute
+    inverter_time:
+      name: "inverter time"
     # ^P005GS
     mppt1_charger_status:
       name: "mppt1 charger status"
@@ -478,3 +481,16 @@ switch:
       name: "alarm on primary source interrupt"
     fault_code_record:
       name: "fault code record"
+
+# The clock the sync button copies to the inverter. With the `api` component use
+# `platform: homeassistant` instead of `sntp`.
+time:
+  - platform: sntp
+    id: sntp_time
+
+button:
+  - platform: pi18
+    pipsolar_id: inverter0
+    sync_clock:
+      name: "sync clock"
+      time_id: sntp_time

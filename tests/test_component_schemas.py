@@ -334,7 +334,7 @@ class TestPi18TextSensorTypes:
         assert pi18_ts.CONF_LAST_P005ET in pi18_ts.TYPES
 
     def test_text_sensor_types_count(self):
-        assert len(pi18_ts.TYPES) == 14
+        assert len(pi18_ts.TYPES) == 15
 
     def test_text_sensor_values_unique(self):
         assert len(pi18_ts.TYPES) == len(set(pi18_ts.TYPES))
@@ -348,6 +348,7 @@ import esphome.config_validation as cv  # noqa: E402
 import pytest  # noqa: E402
 
 from components.pi18 import (  # noqa: E402
+    button as pi18_button,
     datetime as pi18_datetime,
     number as pi18_number,
     output as pi18_output,
@@ -517,3 +518,27 @@ class TestPi18SelectTypes:
     def test_existing_selects_still_need_an_optionsmap(self):
         with pytest.raises(cv.Invalid, match="optionsmap"):
             self._validate(output_source_priority={"name": "priority"})
+
+
+class TestPi18Clock:
+    def test_inverter_time_text_sensor_present(self):
+        assert "inverter_time" in pi18_ts.TYPES
+        config = pi18_ts.CONFIG_SCHEMA(
+            {"pipsolar_id": "inverter0", "inverter_time": {"name": "clock"}}
+        )
+        assert config["inverter_time"]["name"] == "clock"
+
+    def test_sync_clock_requires_time_id(self):
+        with pytest.raises(cv.Invalid, match="time_id"):
+            pi18_button.CONFIG_SCHEMA(
+                {"pipsolar_id": "inverter0", "sync_clock": {"name": "sync"}}
+            )
+
+    def test_sync_clock_validates_with_time_id(self):
+        config = pi18_button.CONFIG_SCHEMA(
+            {
+                "pipsolar_id": "inverter0",
+                "sync_clock": {"name": "sync", "time_id": "ha_time"},
+            }
+        )
+        assert config["sync_clock"]["time_id"].id == "ha_time"

@@ -11,6 +11,7 @@ class FakeUart;
 
 class TestablePipsolar : public Pipsolar {
  public:
+  using Pipsolar::handle_p004t_;
   using Pipsolar::handle_p005et_;
   using Pipsolar::handle_p006fws_;
   using Pipsolar::handle_p005gs_;

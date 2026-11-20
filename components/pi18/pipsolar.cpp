@@ -642,6 +642,9 @@ void Pipsolar::handle_poll_response_(ENUMPollingCommand polling_command, const c
     case POLLING_P006LST:
       handle_p006lst_(message);
       break;
+    case POLLING_P004T:
+      handle_p004t_(message);
+      break;
     case POLLING_P005GS:
       handle_p005gs_(message);
       break;
@@ -686,6 +689,41 @@ void Pipsolar::handle_p006lst_(const char *message) {
   skip_start_(message, &pos);
   // The field is a two-digit code (00, 01, 02, 10, 20); read as a number so "1" works too
   this->publish_select_(this->lcd_sleep_time_select_, this->read_int_(message, &pos));
+}
+
+void Pipsolar::handle_p004t_(const char *message) {
+  if (this->inverter_time_ == nullptr)
+    return;
+  // "^D017" and 14 digits: yyyyMMddHHmmss
+  constexpr size_t PREFIX_LENGTH = 5;
+  constexpr size_t DIGITS = 14;
+  if (strlen(message) != PREFIX_LENGTH + DIGITS)
+    return;
+  const char *d = message + PREFIX_LENGTH;
+  for (size_t i = 0; i < DIGITS; i++) {
+    if (d[i] < '0' || d[i] > '9')
+      return;
+  }
+  char text[20];
+  snprintf(text, sizeof(text), "%.4s-%.2s-%.2s %.2s:%.2s:%.2s", d, d + 4, d + 6, d + 8, d + 10, d + 12);
+  this->inverter_time_->publish_state(text);
+}
+
+std::string Pipsolar::clock_command(const ESPTime &now) {
+  if (!now.is_valid())
+    return "";
+  char command[24];
+  snprintf(command, sizeof(command), "^S018DAT%02d%02d%02d%02d%02d%02d", now.year % 100, now.month, now.day_of_month,
+           now.hour, now.minute, now.second);
+  return command;
+}
+
+bool Pipsolar::sync_clock(const ESPTime &now) {
+  const std::string command = clock_command(now);
+  if (command.empty() || !this->queue_command(command))
+    return false;
+  this->request_poll_refresh(POLLING_P004T);
+  return true;
 }
 
 void Pipsolar::handle_p005gs_(const char *message) {
