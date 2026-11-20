@@ -32,6 +32,34 @@ The project provides three components for different protocol variants:
 * AXIOMA 5 kW
 * MppSolar compatible units responding to `^P005GS`
 
+The `number` platform sets the battery and charging limits of a pi18 inverter:
+`battery_under_voltage` (cut-off), `battery_bulk_voltage`, `battery_float_voltage`,
+`battery_recharge_voltage` (back to utility), `battery_redischarge_voltage` (back to
+battery; 0 means "full") and the two charging currents. The voltage numbers need
+`battery_rated_voltage: 24` or `48` to pick their default ranges; `min_value`,
+`max_value` and `step` override them. A number shows what the inverter last
+reported, so it keeps the old value until the next `^P007PIRI` reply confirms a write.
+
+```yaml
+number:
+  - platform: pi18
+    pipsolar_id: inverter0
+    battery_rated_voltage: 24
+    battery_recharge_voltage:
+      name: "back to utility voltage"
+    battery_redischarge_voltage:
+      name: "back to battery voltage"
+```
+
+A Home Assistant automation action that makes a generator charge the battery by
+returning to the utility at 24.0 V:
+
+```yaml
+- action: number.set_value
+  target: {entity_id: number.mppsolar_back_to_utility_voltage}
+  data: {value: 24.0}
+```
+
 
 ## Requirements
 

@@ -409,6 +409,25 @@ output:
     battery_float_voltage:
       id: inverter0_battery_float_voltage_out
 
+number:
+  - platform: pi18
+    pipsolar_id: inverter0
+    battery_rated_voltage: 48
+    battery_under_voltage:
+      name: "battery cut-off voltage"
+    battery_bulk_voltage:
+      name: "battery bulk voltage"
+    battery_float_voltage:
+      name: "battery float voltage"
+    battery_recharge_voltage:
+      name: "battery back to utility voltage"
+    battery_redischarge_voltage:
+      name: "battery back to battery voltage"
+    current_max_charging_current:
+      name: "max charging current"
+    current_max_ac_charging_current:
+      name: "max ac charging current"
+
 switch:
   - platform: pi18
     pipsolar_id: inverter0

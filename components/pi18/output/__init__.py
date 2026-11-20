@@ -20,7 +20,10 @@ SetOutputAction = pipsolar_ns.class_("SetOutputAction", automation.Action)
 CONF_POSSIBLE_VALUES = "possible_values"
 
 
-_VOLTAGE_STEPS = [round(v * 0.1, 1) for v in range(480, 585)]
+# 24 V banks: 24.0-29.2 V; 48 V banks: 48.0-58.4 V
+_VOLTAGE_STEPS = [round(v * 0.1, 1) for v in range(240, 293)] + [
+    round(v * 0.1, 1) for v in range(480, 585)
+]
 
 ChargeVoltage = pipsolar_ns.enum("ChargeVoltage", is_class=True)
 

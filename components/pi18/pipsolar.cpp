@@ -1,6 +1,7 @@
 #include "pipsolar.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
+#include "pipsolar_number.h"
 #include "pipsolar_select.h"
 
 #include <algorithm>
@@ -270,7 +271,7 @@ std::string Pipsolar::charge_voltage_command(float bulk_voltage, float float_vol
   // The length field (015) assumes exactly three digits per value
   if (bulk_tenths < 1.0f || bulk_tenths > 999.0f || float_tenths < 1.0f || float_tenths > 999.0f)
     return "";
-  char command[24];
+  char command[24] = {};
   snprintf(command, sizeof(command), "^S015MCHGV%03d,%03d", static_cast<int>(bulk_tenths),
            static_cast<int>(float_tenths));
   return command;
@@ -302,6 +303,27 @@ int to_units(NumberSetting setting, float value) {
   return static_cast<int>(std::lround(value * (is_current(setting) ? 1.0f : 10.0f)));
 }
 
+const char *setting_name(NumberSetting setting) {
+  switch (setting) {
+    case NumberSetting::BATTERY_UNDER_VOLTAGE:
+      return "battery cut-off voltage";
+    case NumberSetting::BATTERY_BULK_VOLTAGE:
+      return "bulk voltage";
+    case NumberSetting::BATTERY_FLOAT_VOLTAGE:
+      return "float voltage";
+    case NumberSetting::BATTERY_RECHARGE_VOLTAGE:
+      return "back to utility voltage";
+    case NumberSetting::BATTERY_REDISCHARGE_VOLTAGE:
+      return "back to battery voltage";
+    case NumberSetting::MAX_CHARGING_CURRENT:
+      return "max charging current";
+    case NumberSetting::MAX_AC_CHARGING_CURRENT:
+      return "max AC charging current";
+    default:
+      return "setting";
+  }
+}
+
 // The other half of a setting sent as a pair; the setting itself when it has none
 NumberSetting partner_of(NumberSetting setting) {
   switch (setting) {
@@ -318,9 +340,16 @@ NumberSetting partner_of(NumberSetting setting) {
   }
 }
 
+// Whether units fit the three-digit field. Only back to battery may be 0 ("full").
+bool fits_field(NumberSetting setting, int units) {
+  const int min_units = setting == NumberSetting::BATTERY_REDISCHARGE_VOLTAGE ? 0 : 1;
+  return units >= min_units && units <= MAX_FIELD_VALUE;
+}
+
 // The set command for a value in units; the pair's first and second values for a pair setting
+// or "" for a setting this doesn't know
 std::string set_command(NumberSetting setting, int units, int partner_units) {
-  char command[24];
+  char command[24] = {};
   switch (setting) {
     case NumberSetting::BATTERY_UNDER_VOLTAGE:
       snprintf(command, sizeof(command), "^S010PSDV%03d", units);
@@ -343,6 +372,8 @@ std::string set_command(NumberSetting setting, int units, int partner_units) {
     case NumberSetting::MAX_AC_CHARGING_CURRENT:
       snprintf(command, sizeof(command), "^S014MUCHGC0,%03d", units);
       break;
+    default:
+      break;
   }
   return command;
 }
@@ -360,6 +391,10 @@ void Pipsolar::set_number(NumberSetting setting, PipsolarNumber *number) {
 
 esphome::optional<float> Pipsolar::get_number_setting(NumberSetting setting) const {
   return this->numbers_[static_cast<size_t>(setting)].value;
+}
+
+esphome::optional<float> Pipsolar::get_number_reading(NumberSetting setting) const {
+  return this->numbers_[static_cast<size_t>(setting)].reading;
 }
 
 const std::vector<int> &Pipsolar::get_allowed_currents(NumberSetting setting) const {
@@ -384,32 +419,37 @@ bool Pipsolar::write_outstanding_() const {
                      [](const std::string &command) { return !command.empty(); });
 }
 
-void Pipsolar::apply_reading_(NumberSetting setting, esphome::optional<int32_t> raw, float scale) {
+void Pipsolar::apply_reading_(NumberSetting setting, esphome::optional<int32_t> raw, float divisor) {
   auto &state = this->numbers_[static_cast<size_t>(setting)];
   if (!raw.has_value())
     return;
+  // Divide rather than multiply by the inverse: 540 / 10.0f is exactly 54.0f
+  const float reading = static_cast<float>(*raw) / divisor;
+  state.reading = reading;
+  if (state.entity != nullptr)
+    state.entity->publish_state(reading);
   // A reading taken before a write went out would undo it
   if (state.pending && this->write_outstanding_())
     return;
-  state.value = *raw * scale;
+  state.value = reading;
   state.pending = false;
 }
 
 WriteResult Pipsolar::write_number_setting(NumberSetting setting, float value) {
+  const char *name = setting_name(setting);
   const int units = to_units(setting, value);
-  const bool is_back_to_battery = setting == NumberSetting::BATTERY_REDISCHARGE_VOLTAGE;
-  if (units < (is_back_to_battery ? 0 : 1) || units > MAX_FIELD_VALUE) {
-    ESP_LOGW(TAG, "number setting %u: %.1f can't be sent", static_cast<unsigned>(setting), value);
+  if (!fits_field(setting, units)) {
+    ESP_LOGW(TAG, "%s: %.1f can't be sent", name, value);
     return WriteResult::REJECTED;
   }
   const auto &allowed = this->get_allowed_currents(setting);
   if (!allowed.empty() && std::find(allowed.begin(), allowed.end(), units) == allowed.end()) {
-    ESP_LOGW(TAG, "number setting %u: %d A isn't an allowed current", static_cast<unsigned>(setting), units);
+    ESP_LOGW(TAG, "%s: %d A isn't an allowed current", name, units);
     return WriteResult::REJECTED;
   }
   const auto known = this->get_number_setting(setting);
   if (known.has_value() && to_units(setting, *known) == units) {
-    ESP_LOGD(TAG, "number setting %u already %d", static_cast<unsigned>(setting), units);
+    ESP_LOGD(TAG, "%s is already %d", name, units);
     return WriteResult::UNCHANGED;
   }
 
@@ -418,19 +458,29 @@ WriteResult Pipsolar::write_number_setting(NumberSetting setting, float value) {
   if (partner != setting) {
     const auto partner_known = this->get_number_setting(partner);
     if (!partner_known.has_value()) {
-      ESP_LOGW(TAG, "number setting %u: the paired value isn't known yet", static_cast<unsigned>(setting));
+      ESP_LOGW(TAG, "%s: the paired %s isn't known yet", name, setting_name(partner));
       return WriteResult::REJECTED;
     }
     partner_units = to_units(partner, *partner_known);
+    // The partner is sent as it was read, so a reading the command can't hold stops the write
+    if (!fits_field(partner, partner_units)) {
+      ESP_LOGW(TAG, "%s: the paired %s (%.1f) can't be sent", name, setting_name(partner), *partner_known);
+      return WriteResult::REJECTED;
+    }
   }
 
   const bool queue_has_room = std::any_of(std::begin(this->command_queue_), std::end(this->command_queue_),
                                           [](const std::string &command) { return command.empty(); });
   if (!queue_has_room) {
-    ESP_LOGW(TAG, "number setting %u: command queue full", static_cast<unsigned>(setting));
+    ESP_LOGW(TAG, "%s: command queue full", name);
     return WriteResult::REJECTED;
   }
-  this->queue_command(set_command(setting, units, partner_units));
+  const std::string command = set_command(setting, units, partner_units);
+  if (command.empty()) {
+    ESP_LOGW(TAG, "%s: no set command", name);
+    return WriteResult::REJECTED;
+  }
+  this->queue_command(command);
   this->set_known_(setting, is_current(setting) ? static_cast<float>(units) : units * 0.1f);
   if (partner != setting)
     this->set_known_(partner, *this->get_number_setting(partner));
@@ -626,11 +676,11 @@ void Pipsolar::handle_p007piri_(const char *message) {
   const auto solar_priority = this->read_int_(message, &pos);
   const auto mppt_string = this->read_int_(message, &pos);
 
-  this->apply_reading_(NumberSetting::BATTERY_RECHARGE_VOLTAGE, recharge_v_raw, 0.1f);
-  this->apply_reading_(NumberSetting::BATTERY_REDISCHARGE_VOLTAGE, redischarge_v_raw, 0.1f);
-  this->apply_reading_(NumberSetting::BATTERY_UNDER_VOLTAGE, bat_under_v_raw, 0.1f);
-  this->apply_reading_(NumberSetting::BATTERY_BULK_VOLTAGE, bulk_v_raw, 0.1f);
-  this->apply_reading_(NumberSetting::BATTERY_FLOAT_VOLTAGE, float_v_raw, 0.1f);
+  this->apply_reading_(NumberSetting::BATTERY_RECHARGE_VOLTAGE, recharge_v_raw, 10.0f);
+  this->apply_reading_(NumberSetting::BATTERY_REDISCHARGE_VOLTAGE, redischarge_v_raw, 10.0f);
+  this->apply_reading_(NumberSetting::BATTERY_UNDER_VOLTAGE, bat_under_v_raw, 10.0f);
+  this->apply_reading_(NumberSetting::BATTERY_BULK_VOLTAGE, bulk_v_raw, 10.0f);
+  this->apply_reading_(NumberSetting::BATTERY_FLOAT_VOLTAGE, float_v_raw, 10.0f);
   this->apply_reading_(NumberSetting::MAX_AC_CHARGING_CURRENT, max_ac_charging_i, 1.0f);
   this->apply_reading_(NumberSetting::MAX_CHARGING_CURRENT, max_charging_i, 1.0f);
 

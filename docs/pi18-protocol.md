@@ -267,8 +267,9 @@ It shows "Unknown fault" and the number for codes neither table names.
 
 ## Not implemented by this component
 
-`ED`/`EM`/`EY`, `VFW`, `DI`, `MCHGCR`/`MUCHGCR`, `GMN`, `T`/`DAT`, PIRI field 25,
-and the set commands from `BUCD` down in the table above.
+`ED`/`EM`/`EY`, `VFW`, `DI`, `GMN`, `T`/`DAT`, PIRI field 25, and the set commands
+from `PBT` down in the table above. The `number` platform covers `PSDV`, `MCHGV`,
+`BUCD`, `MCHGC` and `MUCHGC`, and reads `MCHGCR`/`MUCHGCR`.
 
 ## Source and limits
 

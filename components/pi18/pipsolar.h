@@ -253,6 +253,8 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   WriteResult write_number_setting(NumberSetting setting, float value);
   // The pending write if any, else the last reading; empty until the first PIRI reply
   esphome::optional<float> get_number_setting(NumberSetting setting) const;
+  // The last PIRI reading, never a pending write; empty until the first PIRI reply
+  esphome::optional<float> get_number_reading(NumberSetting setting) const;
   // Allowed values from ^P009MCHGCR / ^P010MUCHGCR; empty until answered or for a voltage
   const std::vector<int> &get_allowed_currents(NumberSetting setting) const;
 
@@ -312,8 +314,9 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
 
   // Any command queued, or one being sent or answered
   bool write_outstanding_() const;
-  // Takes a PIRI field as the setting's known value, unless a write to it is still outstanding
-  void apply_reading_(NumberSetting setting, esphome::optional<int32_t> raw, float scale);
+  // Publishes a PIRI field (raw / divisor) to the setting's number. It also becomes the known
+  // value, unless a write to it is still outstanding.
+  void apply_reading_(NumberSetting setting, esphome::optional<int32_t> raw, float divisor);
   void set_known_(NumberSetting setting, float value);
   static std::vector<int> parse_current_list_(const char *message);
 
@@ -336,8 +339,9 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   void read_sensor_(const char *message, size_t *pos, sensor::Sensor *sensor, float scale = 1.0f);
 
   struct NumberState {
-    esphome::optional<float> value;  // last reading, or the pending write
-    bool pending = false;            // value is a write the inverter hasn't confirmed by a reading
+    esphome::optional<float> value;    // last reading, or the pending write
+    esphome::optional<float> reading;  // last reading
+    bool pending = false;              // value is a write the inverter hasn't confirmed by a reading
     PipsolarNumber *entity = nullptr;
   };
   NumberState numbers_[NUMBER_SETTING_COUNT];

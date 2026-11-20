@@ -6,7 +6,15 @@ from esphome.const import CONF_ID
 DEPENDENCIES = ["uart"]
 CODEOWNERS = ["@syssi"]
 DOMAIN = "pi18"
-AUTO_LOAD = ["binary_sensor", "text_sensor", "sensor", "switch", "select", "output"]
+AUTO_LOAD = [
+    "binary_sensor",
+    "text_sensor",
+    "sensor",
+    "switch",
+    "select",
+    "output",
+    "number",
+]
 MULTI_CONF = True
 
 CONF_PIPSOLAR_ID = "pipsolar_id"

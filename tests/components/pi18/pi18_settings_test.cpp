@@ -16,6 +16,10 @@ constexpr const char *SYNTHETIC_P010MUCHGCR = "^D018010,020,030,040";
 constexpr const char *PIRI_CUT_OFF_475 =
     "^D0892300,243,2300,500,243,5600,5600,480,500,520,475,554,540,2,010,060,0,0,2,9,1,0,0,0,1,00";
 
+// The same, with the battery cut-off at 46.0 V
+constexpr const char *PIRI_CUT_OFF_460 =
+    "^D0892300,243,2300,500,243,5600,5600,480,500,520,460,554,540,2,010,060,0,0,2,9,1,0,0,0,1,00";
+
 // Without a time-out, a loop-driven test needs one loop() to send and some more to receive
 struct Fixture {
   FakeUart uart;
@@ -208,8 +212,20 @@ TEST(Pi18SettingsTest, AcceptedWriteIsConfirmedByNextReading) {
   f.inv.update();
   f.exchange(PIRI_CUT_OFF_475);
   EXPECT_NEAR(*f.inv.get_number_setting(NumberSetting::BATTERY_UNDER_VOLTAGE), 47.5f, 0.01f);
-  // Confirmed: a write back to 48.0 is a real change again
-  EXPECT_EQ(f.inv.write_number_setting(NumberSetting::BATTERY_UNDER_VOLTAGE, 48.0f), WriteResult::QUEUED);
+  // Confirmed, so no longer pending: a later reading is taken even while another write is
+  // outstanding. It would be ignored if the reading hadn't cleared the pending flag.
+  f.inv.queue_command("^S006PEA");
+  f.inv.handle_p007piri_(PIRI_CUT_OFF_460);
+  EXPECT_NEAR(*f.inv.get_number_setting(NumberSetting::BATTERY_UNDER_VOLTAGE), 46.0f, 0.01f);
+}
+
+TEST(Pi18SettingsTest, PartnerOutsideTheEncodableRangeIsRejected) {
+  TestablePipsolar inv;
+  inv.handle_p007piri_(LV5048_P007PIRI_BANANNAJOE);
+  // Back to battery of 120.0 V is 4 digits, which %03d would put into the command as is
+  inv.handle_p007piri_("^D0902300,243,2300,500,243,5600,5600,480,500,1200,480,554,540,2,010,060,0,0,2,9,1,0,0,0,1,00");
+  EXPECT_EQ(inv.write_number_setting(NumberSetting::BATTERY_RECHARGE_VOLTAGE, 49.0f), WriteResult::REJECTED);
+  EXPECT_EQ(inv.queued_command(), "");
 }
 
 }  // namespace esphome::pi18::testing

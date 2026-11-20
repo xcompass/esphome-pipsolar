@@ -347,7 +347,11 @@ import re  # noqa: E402
 import esphome.config_validation as cv  # noqa: E402
 import pytest  # noqa: E402
 
-from components.pi18 import output as pi18_output, switch as pi18_switch  # noqa: E402
+from components.pi18 import (  # noqa: E402
+    number as pi18_number,
+    output as pi18_output,
+    switch as pi18_switch,
+)
 from components.pi18.const import (  # noqa: E402
     CONF_BATTERY_BULK_VOLTAGE,
     CONF_BATTERY_FLOAT_VOLTAGE,
@@ -388,3 +392,66 @@ class TestPi18OutputTypes:
         }
         for key in pi18_output.CHARGE_VOLTAGES:
             assert pi18_output.TYPES[key][1] is None
+
+
+class TestPi18OutputVoltageDefaults:
+    def test_output_voltage_defaults_cover_24v_and_48v(self):
+        steps = pi18_output._VOLTAGE_STEPS
+        for volts in (24.0, 29.2, 48.0, 58.4):
+            assert volts in steps
+        assert 30.0 not in steps
+        assert 29.3 not in steps
+
+
+class TestPi18NumberTypes:
+    def _validate(self, **keys):
+        return pi18_number.CONFIG_SCHEMA({"pipsolar_id": "inverter0", **keys})
+
+    def test_voltage_numbers_require_battery_rated_voltage(self):
+        with pytest.raises(cv.Invalid, match="battery_rated_voltage"):
+            self._validate(battery_float_voltage={"name": "float without rated"})
+
+    def test_current_numbers_do_not_need_battery_rated_voltage(self):
+        self._validate(current_max_charging_current={"name": "max charging"})
+
+    def test_battery_rated_voltage_must_be_24_or_48(self):
+        with pytest.raises(cv.Invalid):
+            self._validate(battery_rated_voltage=12)
+        self._validate(
+            battery_rated_voltage=24, battery_float_voltage={"name": "float 24 V"}
+        )
+
+    def test_every_setting_has_a_key(self):
+        assert list(pi18_number.TYPES) == [
+            "battery_under_voltage",
+            "battery_bulk_voltage",
+            "battery_float_voltage",
+            "battery_recharge_voltage",
+            "battery_redischarge_voltage",
+            "current_max_charging_current",
+            "current_max_ac_charging_current",
+        ]
+
+    def test_24v_defaults_match_the_spec(self):
+        assert pi18_number.VOLTAGE_RANGES[24] == {
+            "battery_under_voltage": (20.4, 24.0, 0.1),
+            "battery_bulk_voltage": (24.0, 29.2, 0.1),
+            "battery_float_voltage": (24.0, 29.2, 0.1),
+            "battery_recharge_voltage": (22.0, 25.5, 0.5),
+            "battery_redischarge_voltage": (24.0, 29.0, 0.5),
+        }
+
+    def test_48v_defaults_match_the_spec(self):
+        assert pi18_number.VOLTAGE_RANGES[48] == {
+            "battery_under_voltage": (40.8, 48.0, 0.1),
+            "battery_bulk_voltage": (48.0, 58.4, 0.1),
+            "battery_float_voltage": (48.0, 58.4, 0.1),
+            "battery_recharge_voltage": (44.0, 51.0, 1.0),
+            "battery_redischarge_voltage": (48.0, 58.0, 1.0),
+        }
+
+    def test_current_defaults_match_the_spec(self):
+        assert pi18_number.CURRENT_RANGES == {
+            "current_max_charging_current": (10.0, 90.0, 10.0),
+            "current_max_ac_charging_current": (2.0, 90.0, 1.0),
+        }
