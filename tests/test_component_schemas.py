@@ -342,7 +342,10 @@ class TestPi18TextSensorTypes:
 
 # ── pi18 switches and outputs ─────────────────────────────────────────────────
 
+import asyncio  # noqa: E402
+import itertools  # noqa: E402
 import re  # noqa: E402
+from unittest.mock import MagicMock  # noqa: E402
 
 import esphome.config_validation as cv  # noqa: E402
 import pytest  # noqa: E402
@@ -360,6 +363,13 @@ from components.pi18.const import (  # noqa: E402
     CONF_BATTERY_FLOAT_VOLTAGE,
     CONF_POWER_SAVING,
 )
+
+_entity_names = itertools.count()
+
+
+def _unique_name(prefix):
+    """ESPHome rejects a repeated entity name, even across separate validations."""
+    return f"{prefix} {next(_entity_names)}"
 
 
 def _schema_validator(schema, key):
@@ -460,6 +470,167 @@ class TestPi18NumberTypes:
         }
 
 
+class TestPi18NumberRanges:
+    def _validate(self, **keys):
+        return pi18_number.CONFIG_SCHEMA({"pipsolar_id": "inverter0", **keys})
+
+    def _range(self, key, rated=48, **options):
+        config = self._validate(
+            battery_rated_voltage=rated, **{key: {"name": _unique_name(key), **options}}
+        )
+        return pi18_number._range(config, key)
+
+    def test_default_range_follows_the_battery_voltage(self):
+        assert self._range("battery_bulk_voltage", rated=24) == (24.0, 29.2, 0.1)
+        assert self._range("battery_bulk_voltage", rated=48) == (48.0, 58.4, 0.1)
+        assert self._range("battery_recharge_voltage", rated=24) == (22.0, 25.5, 0.5)
+        assert self._range("battery_recharge_voltage", rated=48) == (44.0, 51.0, 1.0)
+
+    def test_currents_ignore_the_battery_voltage(self):
+        assert self._range("current_max_charging_current", rated=24) == (
+            10.0,
+            90.0,
+            10.0,
+        )
+        assert self._range("current_max_ac_charging_current", rated=48) == (
+            2.0,
+            90.0,
+            1.0,
+        )
+
+    def test_user_values_override_the_defaults_one_by_one(self):
+        assert self._range("battery_float_voltage", min_value=50.0) == (50.0, 58.4, 0.1)
+        assert self._range("battery_float_voltage", max_value=56.0) == (48.0, 56.0, 0.1)
+        assert self._range("battery_float_voltage", step=0.2) == (48.0, 58.4, 0.2)
+        assert self._range(
+            "battery_float_voltage", min_value=50.0, max_value=56.0, step=0.5
+        ) == (50.0, 56.0, 0.5)
+
+    def test_min_value_must_be_below_max_value(self):
+        for options in ({"min_value": 58.4}, {"max_value": 48.0}, {"min_value": 60.0}):
+            with pytest.raises(cv.Invalid, match="min_value") as error:
+                self._validate(
+                    battery_rated_voltage=48,
+                    battery_bulk_voltage={"name": _unique_name("bulk"), **options},
+                )
+            assert error.value.path == ["battery_bulk_voltage"]
+
+    def test_step_must_fit_in_the_range(self):
+        with pytest.raises(cv.Invalid, match="step") as error:
+            self._validate(
+                current_max_charging_current={
+                    "name": _unique_name("current"),
+                    "min_value": 10.0,
+                    "max_value": 20.0,
+                    "step": 20.0,
+                }
+            )
+        assert error.value.path == ["current_max_charging_current"]
+        self._validate(
+            current_max_charging_current={
+                "name": _unique_name("current"),
+                "min_value": 10.0,
+                "max_value": 20.0,
+                "step": 10.0,
+            }
+        )
+
+    def test_voltage_step_must_be_a_multiple_of_a_tenth_of_a_volt(self):
+        with pytest.raises(cv.Invalid, match="resolution"):
+            self._validate(
+                battery_rated_voltage=48,
+                battery_float_voltage={"name": _unique_name("float"), "step": 0.05},
+            )
+        for step in (0.1, 0.3, 0.5, 1.0):  # float error must not matter
+            self._validate(
+                battery_rated_voltage=48,
+                battery_float_voltage={"name": _unique_name("float"), "step": step},
+            )
+
+    def test_current_step_must_be_whole_amperes(self):
+        with pytest.raises(cv.Invalid, match="resolution") as error:
+            self._validate(
+                current_max_ac_charging_current={
+                    "name": _unique_name("ac"),
+                    "step": 0.5,
+                }
+            )
+        assert error.value.path == ["current_max_ac_charging_current"]
+
+    def test_back_to_battery_limits_apply_to_the_non_zero_range(self):
+        with pytest.raises(cv.Invalid, match="min_value"):
+            self._validate(
+                battery_rated_voltage=48,
+                battery_redischarge_voltage={
+                    "name": _unique_name("b"),
+                    "min_value": 58.0,
+                },
+            )
+        with pytest.raises(cv.Invalid, match="step"):
+            self._validate(
+                battery_rated_voltage=48,
+                battery_redischarge_voltage={
+                    "name": _unique_name("b"),
+                    "min_value": 50.0,
+                    "max_value": 52.0,
+                    "step": 5.0,
+                },
+            )
+
+    def test_back_to_battery_is_a_box_by_default(self):
+        config = self._validate(
+            battery_rated_voltage=48,
+            battery_redischarge_voltage={"name": _unique_name("back to battery")},
+            battery_recharge_voltage={"name": _unique_name("back to utility")},
+        )
+        assert config["battery_redischarge_voltage"]["mode"] == "BOX"
+        assert config["battery_recharge_voltage"]["mode"] == "AUTO"
+        config = self._validate(
+            battery_rated_voltage=48,
+            battery_redischarge_voltage={"name": _unique_name("b"), "mode": "slider"},
+        )
+        assert config["battery_redischarge_voltage"]["mode"] == "SLIDER"
+
+    def _generate(self, monkeypatch, key, **options):
+        config = self._validate(
+            battery_rated_voltage=24, **{key: {"name": _unique_name(key), **options}}
+        )
+        created = []
+
+        async def new_number(conf, **kwargs):
+            var = MagicMock()
+            created.append((var, kwargs))
+            return var
+
+        async def get_variable(_):
+            return MagicMock()
+
+        monkeypatch.setattr(pi18_number.number, "new_number", new_number)
+        monkeypatch.setattr(pi18_number.cg, "get_variable", get_variable)
+        monkeypatch.setattr(pi18_number.cg, "add", lambda _: None)
+        asyncio.run(pi18_number.to_code(config))
+        assert len(created) == 1
+        return created[0]
+
+    def test_back_to_battery_accepts_zero_below_the_minimum(self, monkeypatch):
+        var, kwargs = self._generate(monkeypatch, "battery_redischarge_voltage")
+        assert kwargs == {"min_value": 0.0, "max_value": 29.0, "step": 0.5}
+        var.set_min_nonzero_value.assert_called_once_with(24.0)
+
+    def test_back_to_battery_user_limits_become_the_non_zero_range(self, monkeypatch):
+        var, kwargs = self._generate(
+            monkeypatch, "battery_redischarge_voltage", min_value=25.0, max_value=28.0
+        )
+        assert kwargs["min_value"] == 0.0
+        assert kwargs["max_value"] == 28.0
+        var.set_min_nonzero_value.assert_called_once_with(25.0)
+
+    def test_other_numbers_use_their_range_directly(self, monkeypatch):
+        var, kwargs = self._generate(monkeypatch, "battery_recharge_voltage")
+        assert kwargs == {"min_value": 22.0, "max_value": 25.5, "step": 0.5}
+        var.set_min_nonzero_value.assert_not_called()
+
+
 class TestPi18DatetimeTypes:
     def test_datetime_keys_present(self):
         assert list(pi18_datetime.TYPES) == [
@@ -511,9 +682,23 @@ class TestPi18SelectTypes:
 
     def test_built_in_maps_can_be_replaced(self):
         config = self._validate(
-            battery_type={"name": "type", "optionsmap": {"Mine": "^S007PBT2"}}
+            battery_type={
+                "name": "type",
+                "optionsmap": {"Mine": "^S007PBT2"},
+                "statusmap": {"2": "Mine"},
+            }
         )
         assert config["battery_type"]["optionsmap"] == {"Mine": "^S007PBT2"}
+
+    def test_optionsmap_and_statusmap_come_together_on_the_new_selects(self):
+        for key in ("battery_type", "lcd_sleep_time"):
+            for only in (
+                {"optionsmap": {"Mine": "^S007PBT2"}},
+                {"statusmap": {"2": "Mine"}},
+            ):
+                with pytest.raises(cv.Invalid, match="together") as error:
+                    self._validate(**{key: {"name": _unique_name("select"), **only}})
+                assert error.value.path == [key]
 
     def test_existing_selects_still_need_an_optionsmap(self):
         with pytest.raises(cv.Invalid, match="optionsmap"):

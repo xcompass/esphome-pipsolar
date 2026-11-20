@@ -4,6 +4,7 @@ import esphome.config_validation as cv
 from esphome.const import (
     CONF_MAX_VALUE,
     CONF_MIN_VALUE,
+    CONF_MODE,
     CONF_STEP,
     DEVICE_CLASS_CURRENT,
     DEVICE_CLASS_VOLTAGE,
@@ -65,6 +66,11 @@ CURRENT_RANGES = {
 
 _VOLTAGE_KEYS = [key for key in TYPES if key not in CURRENT_RANGES]
 
+# What the inverter can be told: voltages in tenths of a volt, currents in whole amperes
+VOLTAGE_RESOLUTION = 0.1
+CURRENT_RESOLUTION = 1.0
+_RESOLUTION_TOLERANCE = 1e-6
+
 
 def _number_schema(key):
     if key in CURRENT_RANGES:
@@ -79,13 +85,17 @@ def _number_schema(key):
             unit_of_measurement=UNIT_VOLT,
             device_class=DEVICE_CLASS_VOLTAGE,
         )
-    return base.extend(
-        {
-            cv.Optional(CONF_MIN_VALUE): cv.float_,
-            cv.Optional(CONF_MAX_VALUE): cv.float_,
-            cv.Optional(CONF_STEP): cv.positive_float,
-        }
-    )
+    extra = {
+        cv.Optional(CONF_MIN_VALUE): cv.float_,
+        cv.Optional(CONF_MAX_VALUE): cv.float_,
+        cv.Optional(CONF_STEP): cv.positive_float,
+    }
+    if key == CONF_BATTERY_REDISCHARGE_VOLTAGE:
+        # A slider spends most of its travel in the rejected gap between 0 and the minimum
+        extra[cv.Optional(CONF_MODE, default="BOX")] = cv.enum(
+            number.NUMBER_MODES, upper=True
+        )
+    return base.extend(extra)
 
 
 def _require_rated_voltage(config):
@@ -99,17 +109,6 @@ def _require_rated_voltage(config):
     return config
 
 
-CONFIG_SCHEMA = cv.All(
-    PIPSOLAR_COMPONENT_SCHEMA.extend(
-        {
-            cv.Optional(CONF_BATTERY_RATED_VOLTAGE): cv.one_of(24, 48, int=True),
-            **{cv.Optional(key): _number_schema(key) for key in TYPES},
-        }
-    ),
-    _require_rated_voltage,
-)
-
-
 def _range(config, key):
     defaults = CURRENT_RANGES.get(key)
     if defaults is None:
@@ -120,6 +119,47 @@ def _range(config, key):
         conf.get(CONF_MAX_VALUE, defaults[1]),
         conf.get(CONF_STEP, defaults[2]),
     )
+
+
+def _validate_ranges(config):
+    """Check each number's effective min, max and step, defaults included."""
+    for key in TYPES:
+        if key not in config:
+            continue
+        min_value, max_value, step = _range(config, key)
+        resolution = CURRENT_RESOLUTION if key in CURRENT_RANGES else VOLTAGE_RESOLUTION
+        if min_value >= max_value:
+            raise cv.Invalid(
+                f"{CONF_MIN_VALUE} ({min_value}) must be below {CONF_MAX_VALUE} "
+                f"({max_value})",
+                path=[key],
+            )
+        if step > max_value - min_value + _RESOLUTION_TOLERANCE:
+            raise cv.Invalid(
+                f"{CONF_STEP} ({step}) is larger than the range "
+                f"{min_value} to {max_value}",
+                path=[key],
+            )
+        ratio = step / resolution
+        if abs(ratio - round(ratio)) > _RESOLUTION_TOLERANCE:
+            raise cv.Invalid(
+                f"{CONF_STEP} ({step}) must be a multiple of the inverter's "
+                f"resolution, {resolution}",
+                path=[key],
+            )
+    return config
+
+
+CONFIG_SCHEMA = cv.All(
+    PIPSOLAR_COMPONENT_SCHEMA.extend(
+        {
+            cv.Optional(CONF_BATTERY_RATED_VOLTAGE): cv.one_of(24, 48, int=True),
+            **{cv.Optional(key): _number_schema(key) for key in TYPES},
+        }
+    ),
+    _require_rated_voltage,
+    _validate_ranges,
+)
 
 
 async def to_code(config):

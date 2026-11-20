@@ -84,6 +84,17 @@ PIPSELECT_SCHEMA = cv.COMPONENT_SCHEMA.extend(
 
 def require_option_maps(config):
     for type in TYPES:
+        # A map of one kind without the other would leave the built-in one mismatched
+        if (
+            type in DEFAULT_MAPS
+            and type in config
+            and (CONF_OPTIONSMAP in config[type]) != (CONF_STATUSMAP in config[type])
+        ):
+            raise cv.Invalid(
+                f"{CONF_OPTIONSMAP} and {CONF_STATUSMAP} must be given together, "
+                "or neither",
+                path=[type],
+            )
         if (
             type in config
             and type not in DEFAULT_MAPS
