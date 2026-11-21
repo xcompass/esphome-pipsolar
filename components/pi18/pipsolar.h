@@ -185,8 +185,8 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   PIPSOLAR_BINARY_SENSOR(backlight_on, P007FLAG)
   PIPSOLAR_BINARY_SENSOR(alarm_on_when_primary_source_interrupt, P007FLAG)
   PIPSOLAR_BINARY_SENSOR(fault_code_record, P007FLAG)
-  // Field 8. SolarPower doesn't read it, so its meaning is unconfirmed; the
-  // ^S006PEI/PDI command is the machine type setting, not power saving.
+  // Field 8. SolarPower reads it as flag I, the machine type (P18ComUSBProcessor.java:1171), not
+  // power saving; ^S006PEI/PDI sets the same setting.
   PIPSOLAR_BINARY_SENSOR(power_saving, P007FLAG)
 
   // ^P006FWS — fault/warning status

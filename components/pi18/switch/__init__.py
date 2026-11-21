@@ -74,7 +74,7 @@ AC_OUTPUT_SCHEMA = (
 )
 
 # ^S006PEI/PDI isn't power saving: MPP Solar's SolarPower uses flag I for the machine
-# type (Hybrid/Off-grid, PIRI field 20), and never reads FLAG field 8.
+# type (Hybrid/Off-grid, PIRI field 20), and reads FLAG field 8 as that flag.
 POWER_SAVING_REMOVED = (
     "The pi18 power_saving switch was removed: its command (^S006PEI/PDI) sets the "
     "machine type (Hybrid/Off-grid) in MPP Solar's SolarPower, not power saving. "

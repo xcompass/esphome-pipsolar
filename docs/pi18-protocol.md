@@ -263,8 +263,7 @@ is accepted but does nothing useful while `LON0` is refused.
 time for AC output on/off"). Measured on the LV2424 on 2026-11-20:
 
 - **On inside the window.** The output is on only inside `[start, end)`. `0000,0000`
-  disables the timer, so the output is always on. A window with start after end wraps
-  past midnight.
+  disables the timer, so the output is always on.
 - **Whole hours only.** `1500,0000` and `0000,0000` got `^1`; `1438,0000` and
   `1446,0000` got `^0` three times each.
 - **Off is immediate.** A window that excluded the current hour cut the output within
@@ -277,6 +276,9 @@ time for AC output on/off"). Measured on the LV2424 on 2026-11-20:
 - **No "always off" window.** `0100,0100` got `^1` but was stored as `0000,0000`.
 - **Inverter clock.** The window is checked against the inverter's own clock
   (`^P004T`).
+
+Assumption, not measured: the component writes windows as `[h-1:00, h:00)` mod 24 and
+treats a window with start after end as wrapping past midnight.
 
 The component's `ac_output` switch builds on this: Off writes `[h-1:00, h:00)` for the
 inverter's current hour `h`, On writes `0000,0000`.

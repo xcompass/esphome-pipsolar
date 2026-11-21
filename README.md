@@ -88,8 +88,8 @@ and `ac_output_end_time`. They are read every minute. Setting one end sends both
 (`^S016ACCT` or `^S016ACLT`), with the other end as last read, so a write is refused
 until the first reading arrives. Seconds are ignored. The inverter only accepts whole
 hours, so a time with non-zero minutes is rejected with the warning "The inverter only
-accepts whole hours" and the entity shows its reading again (an LV2424 refuses such
-windows with `^0` anyway). Like the numbers, the entity shows the inverter's reading, not
+accepts whole hours" and the entity shows its reading again, for both windows (an LV2424
+was measured refusing such `ACLT` output windows with `^0`; `ACCT` wasn't measured). Like the numbers, the entity shows the inverter's reading, not
 the time you set, until the next reading confirms it.
 
 ```yaml
@@ -126,8 +126,11 @@ switch:
   hours too. It has no "always off" window: an equal start and end is stored as
   `00:00`-`00:00`.
 - **Staying off.** While the switch is Off it moves the window about once a day, an hour
-  before it would open, so the output stays off. That is about one write a day, because
-  the inverter already reports an "EEPROM fail" warning. If the ESP32 is down when the
+  before it would open, so the output stays off. The switch keeps this to about one write
+  a day to spare the inverter's settings memory, which already reports an "EEPROM fail"
+  warning. If a re-arm write doesn't take effect (refused, or not stored), it stops after
+  3 tries until the next On or Off request, and the window's own start then brings the
+  output back. If the ESP32 is down when the
   window opens, the output comes back on by itself within 23 hours.
 - **The switch owns the timer while Off.** A schedule you set with the
   `ac_output_start_time` and `ac_output_end_time` entities is overwritten at the next
@@ -142,13 +145,15 @@ switch:
 - **Low-battery guard.** On is refused, with a warning in the log, while the inverter
   reports the battery-under-shutdown warning, or before the first fault and warning
   reply after boot. This is because switching the output on during a low-battery cut-off
-  made the inverter alarm and drop the output again after 26 s. The guard has a limit: the
+  made the inverter alarm and drop the output again after 26 s (measured when a window
+  start turned the output on during a cut-off). The guard has a limit: the
   inverter turns the output on by itself when a window starts, even during such a
   cut-off, and the switch can't prevent that.
 - **Clock.** Everything is checked against the inverter's own clock, which is not kept
   right by the inverter (an LV2424 was 30 minutes off). Off is refused, with a warning,
-  until the clock and the window have been read, or when the command queue is full. Press
-  `sync_clock` daily (see below).
+  until the clock and the window have been read, or when the command queue is full. On is
+  also refused until the inverter's clock has been read, unless the timer already has the
+  output on. Automate `sync_clock` daily (see below).
 - **Polls.** The switch adds the `^P004T` clock and `^P007ACLT` window polls (once a
   minute) and the `^P006FWS` poll (every update), even without the clock sensor or the
   window entities.
