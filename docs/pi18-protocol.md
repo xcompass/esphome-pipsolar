@@ -163,12 +163,12 @@ and status as 0.
 | 5 | Backlight on | F |
 | 6 | Beeps while primary source interrupt | G |
 | 7 | Fault code record | H |
-| 8 | Not read by the app; meaning unconfirmed | |
+| 8 | Read by the app as flag I, the machine type (`P18ComUSBProcessor.java:1171`) | I |
 | 9 | BMS connected (longer replies only) | |
 | 12 | Generator charging enable | M |
 | 14, 15 | Dry contact enable, battery feed into grid | N, O |
 
-Flag I is the machine type (PIRI field 20), not a FLAG field. The app labels
+Flag I is the machine type (also PIRI field 20). The app labels
 it "Model type: Hybrid / Off-grid", or "Grid connection enabled" on V4 WP
 models.
 
@@ -213,8 +213,8 @@ matched (apart from the clock).
 - **Allowed currents:** max charging 10 to 140 A in steps of 10; max AC
   charging 2 A, then 10 to 60 A in steps of 10.
 - **`ACCT`/`ACLT`:** both read `0000,0000`, which is the inverter's factory
-  value. What an equal start and end means (always on, or never) isn't
-  verified. The component publishes 00:00 for both ends.
+  value. For `ACLT` this disables the timer, so the output is always on (see
+  "`ACLT` semantics" below). The component publishes 00:00 for both ends.
 - **`LST`:** the LV2424 refuses the query, so the LCD sleep time can't be read
   back.
 - **Clock:** the inverter clock read 13:06:18 when the ESP32's clock read
@@ -228,7 +228,7 @@ Payloads follow `^Snnn`. Values marked ×10 are sent in tenths.
 
 | Payload | Effect |
 |---|---|
-| `LON1`, `LON0` | AC output on, off. The app never reads the output state back, and an LV2424 refuses `LON0`. |
+| `LON1`, `LON0` | AC output on, off. The app never reads the output state back, and an LV2424 refuses `LON0` (see below). |
 | `PE`x, `PD`x | Enable, disable flag x (A–H as in FLAG; I is machine type Hybrid/Off-grid; S is the second AC output) |
 | `POP`n | Output source priority, 0 or 1 |
 | `PSP`n | Solar power priority, 0 or 1 (2 on some models) |
@@ -250,6 +250,36 @@ Payloads follow `^Snnn`. Values marked ×10 are sent in tenths.
 | `PF` | Restore factory defaults |
 | `CLE` | Clear stored energy data |
 | `BST` | Activate a Li-Fe battery now |
+
+### `LON0` on the LV2424
+
+`^S007LON0` (the app's "Real-time control, AC output control") got `^0` 4 out of 4
+times, on battery and on grid, including when SolarPower 1.23SP3 itself sent it. `LON1`
+is accepted but does nothing useful while `LON0` is refused.
+
+### `ACLT` semantics
+
+`ACLT` is the vendor's "AC Output ON/Off Timer" (manual programs 32 and 33, "Scheduled
+time for AC output on/off"). Measured on the LV2424 on 2026-11-20:
+
+- **On inside the window.** The output is on only inside `[start, end)`. `0000,0000`
+  disables the timer, so the output is always on. A window with start after end wraps
+  past midnight.
+- **Whole hours only.** `1500,0000` and `0000,0000` got `^1`; `1438,0000` and
+  `1446,0000` got `^0` three times each.
+- **Off is immediate.** A window that excluded the current hour cut the output within
+  about 1 s, grid pass-through included.
+- **On is immediate.** Writing `0000,0000` while the output was off turned it on within
+  about 3 s.
+- **The start time turns the output on.** At the window start the output switched on by
+  itself, even during a low-battery cut-off standby. In that case it dropped again 26 s
+  later with the low-battery alarm.
+- **No "always off" window.** `0100,0100` got `^1` but was stored as `0000,0000`.
+- **Inverter clock.** The window is checked against the inverter's own clock
+  (`^P004T`).
+
+The component's `ac_output` switch builds on this: Off writes `[h-1:00, h:00)` for the
+inverter's current hour `h`, On writes `0000,0000`.
 
 For the LV2424's class (`P1834K`) the settings page offers these dropdowns:
 `RS`, `PCP`, `POP`, `PSP`, `MCHGC`, `MUCHGC`, `POPM` (output mode), `PGR`,
@@ -308,6 +338,8 @@ Implemented set commands:
   `ACLT`, and reads them with `^P007ACCT` and `^P007ACLT` every 60 s.
 - The `inverter_time` text sensor reads `T` with `^P004T` every 60 s, and the
   `sync_clock` button sets the clock with `DAT`.
+- The `switch` platform's `ac_output` turns the output on and off with `ACLT`, as
+  described under "`ACLT` semantics". It stands in for `LON0`, which isn't used.
 
 ## Source and limits
 

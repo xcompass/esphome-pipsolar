@@ -482,6 +482,9 @@ switch:
       name: "alarm on primary source interrupt"
     fault_code_record:
       name: "fault code record"
+    # Turns the 110 V output on/off through the AC output timer (LV2424 only); see README
+    ac_output:
+      name: "ac output"
 
 # The clock the sync button copies to the inverter. With the `api` component use
 # `platform: homeassistant` instead of `sntp`.
