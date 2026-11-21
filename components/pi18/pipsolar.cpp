@@ -711,8 +711,9 @@ void Pipsolar::rearm_ac_output_() {
   if (this->write_outstanding() || this->times_[static_cast<size_t>(TimeWindowEnd::AC_OUTPUT_START)].pending ||
       this->times_[static_cast<size_t>(TimeWindowEnd::AC_OUTPUT_END)].pending)
     return;
-  if (this->write_ac_output_off_(*start, *end, *this->inverter_minute_of_day_) == WriteResult::QUEUED)
+  if (this->write_ac_output_off_(*start, *end, *this->inverter_minute_of_day_) == WriteResult::QUEUED) {
     ESP_LOGI(TAG, "Re-armed the AC output off window");
+  }
 }
 
 std::vector<int> Pipsolar::parse_current_list_(const char *message) {
