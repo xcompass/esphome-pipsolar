@@ -89,26 +89,26 @@ TEST(Pi18TimeWindowTest, EntitiesShowTheReading) {
 TEST(Pi18TimeWindowTest, StartWriteKeepsTheEnd) {
   TestablePipsolar inv;
   inv.handle_p007acct_(SYNTHETIC_WINDOW_2300_0600);
-  EXPECT_EQ(inv.write_time_setting(TimeWindowEnd::AC_CHARGE_START, 22, 30), WriteResult::QUEUED);
-  EXPECT_EQ(inv.queued_command(), "^S016ACCT2230,0600");
-  EXPECT_EQ(inv.write_time_setting(TimeWindowEnd::AC_CHARGE_END, 7, 5), WriteResult::QUEUED);
-  EXPECT_EQ(inv.queued_command(1), "^S016ACCT2230,0705");
+  EXPECT_EQ(inv.write_time_setting(TimeWindowEnd::AC_CHARGE_START, 22, 0), WriteResult::QUEUED);
+  EXPECT_EQ(inv.queued_command(), "^S016ACCT2200,0600");
+  EXPECT_EQ(inv.write_time_setting(TimeWindowEnd::AC_CHARGE_END, 7, 0), WriteResult::QUEUED);
+  EXPECT_EQ(inv.queued_command(1), "^S016ACCT2200,0700");
 }
 
 TEST(Pi18TimeWindowTest, OutputWindowUsesAclt) {
   TestablePipsolar inv;
   inv.handle_p007aclt_(SYNTHETIC_WINDOW_2300_0600);
-  EXPECT_EQ(inv.write_time_setting(TimeWindowEnd::AC_OUTPUT_START, 22, 30), WriteResult::QUEUED);
-  EXPECT_EQ(inv.queued_command(), "^S016ACLT2230,0600");
+  EXPECT_EQ(inv.write_time_setting(TimeWindowEnd::AC_OUTPUT_START, 22, 0), WriteResult::QUEUED);
+  EXPECT_EQ(inv.queued_command(), "^S016ACLT2200,0600");
   EXPECT_EQ(inv.write_time_setting(TimeWindowEnd::AC_OUTPUT_END, 5, 0), WriteResult::QUEUED);
-  EXPECT_EQ(inv.queued_command(1), "^S016ACLT2230,0500");
+  EXPECT_EQ(inv.queued_command(1), "^S016ACLT2200,0500");
 }
 
 TEST(Pi18TimeWindowTest, UnknownPartnerIsRejected) {
   TestablePipsolar inv;
-  EXPECT_EQ(inv.write_time_setting(TimeWindowEnd::AC_CHARGE_START, 22, 30), WriteResult::REJECTED);
+  EXPECT_EQ(inv.write_time_setting(TimeWindowEnd::AC_CHARGE_START, 22, 0), WriteResult::REJECTED);
   inv.handle_p007aclt_(SYNTHETIC_WINDOW_2300_0600);  // the other window doesn't help
-  EXPECT_EQ(inv.write_time_setting(TimeWindowEnd::AC_CHARGE_START, 22, 30), WriteResult::REJECTED);
+  EXPECT_EQ(inv.write_time_setting(TimeWindowEnd::AC_CHARGE_START, 22, 0), WriteResult::REJECTED);
   EXPECT_EQ(queued_count(inv), 0u);
 }
 
@@ -118,6 +118,22 @@ TEST(Pi18TimeWindowTest, OutOfRangeWriteIsRejected) {
   EXPECT_EQ(inv.write_time_setting(TimeWindowEnd::AC_CHARGE_START, 24, 0), WriteResult::REJECTED);
   EXPECT_EQ(inv.write_time_setting(TimeWindowEnd::AC_CHARGE_START, 12, 60), WriteResult::REJECTED);
   EXPECT_EQ(queued_count(inv), 0u);
+}
+
+TEST(Pi18TimeWindowTest, MinutesAreRejected) {
+  TestablePipsolar inv;
+  inv.handle_p007aclt_(SYNTHETIC_WINDOW_2300_0600);
+  EXPECT_EQ(inv.write_time_setting(TimeWindowEnd::AC_OUTPUT_START, 14, 38), WriteResult::REJECTED);
+  EXPECT_EQ(inv.write_time_setting(TimeWindowEnd::AC_OUTPUT_END, 6, 1), WriteResult::REJECTED);
+  EXPECT_EQ(queued_count(inv), 0u);
+  EXPECT_EQ(*inv.get_time_setting(TimeWindowEnd::AC_OUTPUT_START), 2300);
+}
+
+TEST(Pi18TimeWindowTest, WholeHourStillWrites) {
+  TestablePipsolar inv;
+  inv.handle_p007aclt_(SYNTHETIC_WINDOW_2300_0600);
+  EXPECT_EQ(inv.write_time_setting(TimeWindowEnd::AC_OUTPUT_START, 14, 0), WriteResult::QUEUED);
+  EXPECT_EQ(inv.queued_command(), "^S016ACLT1400,0600");
 }
 
 TEST(Pi18TimeWindowTest, InvalidTimesAreTreatedAsMissing) {
@@ -146,14 +162,14 @@ TEST(Pi18TimeWindowTest, SameTimeSendsNothing) {
 TEST(Pi18TimeWindowTest, ReadingBeforeTheWriteIsSentDoesNotUndoIt) {
   TestablePipsolar inv;
   inv.handle_p007acct_(SYNTHETIC_WINDOW_2300_0600);
-  ASSERT_EQ(inv.write_time_setting(TimeWindowEnd::AC_CHARGE_START, 22, 30), WriteResult::QUEUED);
+  ASSERT_EQ(inv.write_time_setting(TimeWindowEnd::AC_CHARGE_START, 22, 0), WriteResult::QUEUED);
   inv.handle_p007acct_(SYNTHETIC_WINDOW_2300_0600);  // an old reading while the write is queued
-  EXPECT_EQ(*inv.get_time_setting(TimeWindowEnd::AC_CHARGE_START), 2230);
+  EXPECT_EQ(*inv.get_time_setting(TimeWindowEnd::AC_CHARGE_START), 2200);
   // Writing the same value again sends nothing
-  EXPECT_EQ(inv.write_time_setting(TimeWindowEnd::AC_CHARGE_START, 22, 30), WriteResult::UNCHANGED);
+  EXPECT_EQ(inv.write_time_setting(TimeWindowEnd::AC_CHARGE_START, 22, 0), WriteResult::UNCHANGED);
   // The partner is sent as already known, so the end write after the start keeps 22:30
   EXPECT_EQ(inv.write_time_setting(TimeWindowEnd::AC_CHARGE_END, 7, 0), WriteResult::QUEUED);
-  EXPECT_EQ(inv.queued_command(1), "^S016ACCT2230,0700");
+  EXPECT_EQ(inv.queued_command(1), "^S016ACCT2200,0700");
 }
 
 TEST(Pi18TimeWindowTest, EntityControlWritesAndIgnoresSeconds) {
@@ -163,8 +179,8 @@ TEST(Pi18TimeWindowTest, EntityControlWritesAndIgnoresSeconds) {
   start.set_window_end(TimeWindowEnd::AC_CHARGE_START);
   inv.set_time_window_end(TimeWindowEnd::AC_CHARGE_START, &start);
   inv.handle_p007acct_(SYNTHETIC_WINDOW_2300_0600);
-  start.make_call().set_time(22, 30, 45).perform();
-  EXPECT_EQ(inv.queued_command(), "^S016ACCT2230,0600");
+  start.make_call().set_time(22, 0, 45).perform();
+  EXPECT_EQ(inv.queued_command(), "^S016ACCT2200,0600");
   // The entity keeps showing the reading until the inverter reports the change
   EXPECT_EQ(start.hour, 23);
   EXPECT_EQ(start.minute, 0);
@@ -178,8 +194,8 @@ TEST(Pi18TimeWindowTest, EntityControlTakesMissingFieldsFromTheState) {
   start.set_window_end(TimeWindowEnd::AC_CHARGE_START);
   inv.set_time_window_end(TimeWindowEnd::AC_CHARGE_START, &start);
   inv.handle_p007acct_(SYNTHETIC_WINDOW_2300_0600);
-  start.make_call().set_minute(15).perform();
-  EXPECT_EQ(inv.queued_command(), "^S016ACCT2315,0600");
+  start.make_call().set_hour(21).perform();
+  EXPECT_EQ(inv.queued_command(), "^S016ACCT2100,0600");
 }
 
 TEST(Pi18TimeWindowTest, UnchangedControlRepublishesTheReading) {
@@ -223,13 +239,13 @@ TEST(Pi18TimeWindowTest, WriteRefreshesThePoll) {
     inv.run(uart, 6);
   }
   const size_t before = uart.count_sent("^P007ACCT");
-  start.make_call().set_time(22, 30, 0).perform();
+  start.make_call().set_time(22, 0, 0).perform();
   for (int i = 0; i < 12; i++) {
     inv.loop();
     uart.receive(inv.reply("^1"));
     inv.run(uart, 6);
   }
-  EXPECT_EQ(uart.count_sent("^S016ACCT2230,0600"), 1u);
+  EXPECT_EQ(uart.count_sent("^S016ACCT2200,0600"), 1u);
   EXPECT_GT(uart.count_sent("^P007ACCT"), before);
 }
 
@@ -239,10 +255,10 @@ TEST(Pi18TimeWindowTest, FullQueueRejectsAWriteWithoutPending) {
   inv.set_uart_parent(&uart);
   inv.handle_p007acct_(SYNTHETIC_WINDOW_2300_0600);
   fill_queue(inv);
-  EXPECT_EQ(inv.write_time_setting(TimeWindowEnd::AC_CHARGE_START, 22, 30), WriteResult::REJECTED);
+  EXPECT_EQ(inv.write_time_setting(TimeWindowEnd::AC_CHARGE_START, 22, 0), WriteResult::REJECTED);
   EXPECT_EQ(*inv.get_time_setting(TimeWindowEnd::AC_CHARGE_START), 2300);
   drain_queue(inv, uart);
-  EXPECT_EQ(inv.write_time_setting(TimeWindowEnd::AC_CHARGE_START, 22, 30), WriteResult::QUEUED);
+  EXPECT_EQ(inv.write_time_setting(TimeWindowEnd::AC_CHARGE_START, 22, 0), WriteResult::QUEUED);
 }
 
 }  // namespace esphome::pi18::testing

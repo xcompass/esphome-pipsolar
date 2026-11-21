@@ -583,6 +583,10 @@ WriteResult Pipsolar::write_time_setting(TimeWindowEnd end, uint8_t hour, uint8_
     ESP_LOGW(TAG, "%02d:%02d isn't a time", hour, minute);
     return WriteResult::REJECTED;
   }
+  if (minute != 0) {
+    ESP_LOGW(TAG, "The inverter only accepts whole hours, so %02d:%02d was not sent", hour, minute);
+    return WriteResult::REJECTED;
+  }
   const uint16_t time = hour * 100 + minute;
   if (this->get_time_setting(end) == time) {
     ESP_LOGD(TAG, "The window end is already %04d", time);
