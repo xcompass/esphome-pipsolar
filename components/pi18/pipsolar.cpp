@@ -91,6 +91,7 @@ void Pipsolar::loop() {
       poll.refusals = 0;
       poll.needs_update = false;
       poll.answered = true;
+      poll.ever_answered = true;
       poll.failed_intervals = 0;
       this->state_ = STATE_POLL_CHECKED;
       return;
@@ -507,6 +508,7 @@ ENUMPollingCommand window_poll(TimeWindowEnd end) {
 constexpr uint16_t MINUTES_PER_DAY = 24 * 60;
 // Off is rewritten when the window would open within this many minutes
 constexpr uint16_t AC_OUTPUT_REARM_MINUTES = 60;
+constexpr uint8_t AC_OUTPUT_REARM_WRITES_MAX = 3;
 
 }  // namespace
 
@@ -652,6 +654,7 @@ void Pipsolar::publish_ac_output_state_() {
 }
 
 WriteResult Pipsolar::write_ac_output(bool on) {
+  this->ac_output_rearm_writes_ = 0;
   const WriteResult result = this->write_ac_output_(on);
   if (result == WriteResult::QUEUED || result == WriteResult::UNCHANGED)
     this->ac_output_keep_off_ = !on;
@@ -693,11 +696,15 @@ WriteResult Pipsolar::write_ac_output_(bool on) {
   return this->write_ac_output_off_(*start, *end, *minute);
 }
 
-WriteResult Pipsolar::write_ac_output_off_(uint16_t start, uint16_t end, uint16_t minute) {
+bool Pipsolar::ac_output_off_write_needed_(uint16_t start, uint16_t end, uint16_t minute) {
   const bool disabled = start == end;
   const uint16_t start_minute = start / 100 * 60 + start % 100;
   const bool opens_soon = (start_minute + MINUTES_PER_DAY - minute) % MINUTES_PER_DAY <= AC_OUTPUT_REARM_MINUTES;
-  if (!disabled && !window_contains(start, end, minute) && !opens_soon) {
+  return disabled || window_contains(start, end, minute) || opens_soon;
+}
+
+WriteResult Pipsolar::write_ac_output_off_(uint16_t start, uint16_t end, uint16_t minute) {
+  if (!ac_output_off_write_needed_(start, end, minute)) {
     ESP_LOGD(TAG, "The AC output timer already keeps the output off");
     return WriteResult::UNCHANGED;
   }
@@ -715,7 +722,23 @@ void Pipsolar::rearm_ac_output_() {
   if (this->write_outstanding() || this->times_[static_cast<size_t>(TimeWindowEnd::AC_OUTPUT_START)].pending ||
       this->times_[static_cast<size_t>(TimeWindowEnd::AC_OUTPUT_END)].pending)
     return;
-  if (this->write_ac_output_off_(*start, *end, *this->inverter_minute_of_day_) == WriteResult::QUEUED) {
+  const uint16_t minute = *this->inverter_minute_of_day_;
+  if (!ac_output_off_write_needed_(*start, *end, minute)) {
+    this->ac_output_rearm_writes_ = 0;  // the window keeps the output off
+    return;
+  }
+  // Writes that don't take effect (refused, or not stored) would otherwise repeat on every reading
+  // and wear out the inverter's settings memory. The window's own start then turns the output back on.
+  if (this->ac_output_rearm_writes_ >= AC_OUTPUT_REARM_WRITES_MAX) {
+    if (this->ac_output_rearm_writes_ == AC_OUTPUT_REARM_WRITES_MAX) {
+      ESP_LOGE(TAG, "The AC output off window doesn't hold after %u writes, no longer re-arming it",
+               AC_OUTPUT_REARM_WRITES_MAX);
+      this->ac_output_rearm_writes_++;
+    }
+    return;
+  }
+  if (this->write_ac_output_off_(*start, *end, minute) == WriteResult::QUEUED) {
+    this->ac_output_rearm_writes_++;
     ESP_LOGI(TAG, "Re-armed the AC output off window");
   }
 }
@@ -1280,7 +1303,7 @@ void Pipsolar::update() {
       continue;
     if (poll.schedule == PollSchedule::ONCE && poll.answered)
       continue;
-    if (poll.sent && !poll.answered && ++poll.failed_intervals >= UNSUPPORTED_AFTER_INTERVALS) {
+    if (poll.sent && !poll.answered && !poll.ever_answered && ++poll.failed_intervals >= UNSUPPORTED_AFTER_INTERVALS) {
       ESP_LOGW(TAG, "%s not supported by this inverter, no longer polled", poll.command);
       poll.unsupported = true;
       poll.needs_update = false;

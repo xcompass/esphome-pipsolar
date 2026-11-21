@@ -77,8 +77,9 @@ struct PollingCommand {
   ENUMPollingCommand identifier;
   bool needs_update;
   PollSchedule schedule = PollSchedule::EVERY_UPDATE;
-  bool sent = false;      // sent during this interval (SLOW and ONCE)
-  bool answered = false;  // answered at least once ever (ONCE) or during this interval (SLOW)
+  bool sent = false;           // sent during this interval (SLOW and ONCE)
+  bool answered = false;       // answered at least once ever (ONCE) or during this interval (SLOW)
+  bool ever_answered = false;  // a query that has answered once is never dropped as unsupported
   uint8_t failed_intervals = 0;
   bool unsupported = false;
 };
@@ -397,6 +398,7 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   WriteResult write_ac_output_(bool on);
   // Writes the hour that just ended as the off window, unless the window already keeps the output
   // off for the next hour. Shared by the Off request and the re-arm.
+  static bool ac_output_off_write_needed_(uint16_t start, uint16_t end, uint16_t minute);
   WriteResult write_ac_output_off_(uint16_t start, uint16_t end, uint16_t minute);
   // Runs once per ^P004T reading while keep off is set; skipped while a window write is outstanding
   void rearm_ac_output_();
@@ -407,6 +409,8 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   switch_::Switch *ac_output_switch_{};
   esphome::optional<uint16_t> inverter_minute_of_day_;
   bool ac_output_keep_off_{false};
+  // consecutive re-arm writes the window reading hasn't confirmed
+  uint8_t ac_output_rearm_writes_{0};
   esphome::optional<bool> battery_under_shutdown_;  // from the last ^P006FWS reply
 
   void publish_mppt_status_(text_sensor::TextSensor *sensor, esphome::optional<int32_t> value);

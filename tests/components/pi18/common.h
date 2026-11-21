@@ -43,6 +43,12 @@ class TestablePipsolar : public Pipsolar {
 
   void run(FakeUart &uart, int loops = 6);
 
+  // True while a poll is waiting for its reply, and which one
+  bool polling() const { return this->state_ == STATE_POLL; }
+  ENUMPollingCommand polling_identifier() const {
+    return this->enabled_polling_commands_[this->last_polling_command_].identifier;
+  }
+
   // Registered poll command n as text, or "" when that slot is unused
   std::string polling_command(size_t n) const {
     const auto &entry = this->enabled_polling_commands_[n];

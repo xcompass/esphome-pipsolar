@@ -51,6 +51,37 @@ std::string aclt_command(const TestablePipsolar &inv) {
   return "";
 }
 
+// Lets the queued command out and answers it with ^1; the readings are left as they were
+void accept_queued_command(TestablePipsolar &inv, FakeUart &uart) {
+  if (queued_count(inv) == 0)
+    return;
+  inv.loop();  // sends it
+  uart.receive(inv.reply("^1"));
+  inv.loop();  // reads the reply
+  inv.loop();  // finishes the command
+}
+
+// Runs the polls. Answered polls get the given clock and window readings; otherwise each poll
+// times out.
+void run_polls(TestablePipsolar &inv, FakeUart &uart, bool answer, const char *hhmm, const char *start, const char *end,
+               int loops = 30) {
+  for (int i = 0; i < loops; i++) {
+    inv.loop();
+    if (!inv.polling())
+      continue;
+    if (!answer) {
+      delay(2);
+    } else if (inv.polling_identifier() == POLLING_P004T) {
+      uart.receive(inv.reply(synthetic_clock(hhmm)));
+    } else if (inv.polling_identifier() == POLLING_P007ACLT) {
+      uart.receive(inv.reply(synthetic_window(start, end)));
+    } else {
+      uart.receive(inv.reply(LV2424_P006FWS));
+    }
+    inv.loop();
+  }
+}
+
 }  // namespace
 
 TEST(Pi18AcOutputTest, RegistersClockWindowAndWarningPolls) {
@@ -327,6 +358,81 @@ TEST(Pi18AcOutputTest, RefusedOffRetriesOncePerClockReading) {
   inv.handle_p004t_(synthetic_clock("0911").c_str());
   EXPECT_EQ(aclt_count(inv), 1u);
   EXPECT_EQ(aclt_command(inv), "^S016ACLT0800,0900");
+}
+
+TEST(Pi18AcOutputTest, AnsweredSlowPollsSurviveALinkOutage) {
+  FakeUart uart;
+  TestablePipsolar inv;
+  inv.set_uart_parent(&uart);
+  inv.set_update_interval(30000);  // 2 updates make one slow interval
+  inv.set_command_timeout_ms(1);
+  TestSwitch sw;
+  inv.set_ac_output_switch(&sw);
+  run_polls(inv, uart, true, "1306", "0000", "0000");
+  ASSERT_TRUE(sw.has_state());
+  EXPECT_TRUE(sw.state);
+  for (int interval = 0; interval < 5; interval++) {  // more than UNSUPPORTED_AFTER_INTERVALS
+    inv.update();
+    inv.update();
+    run_polls(inv, uart, false, "", "", "");
+  }
+  const size_t sent = uart.count_sent("^P004T");
+  inv.update();
+  inv.update();
+  run_polls(inv, uart, true, "1100", "1200", "1300");
+  EXPECT_GT(uart.count_sent("^P004T"), sent);
+  EXPECT_FALSE(sw.state);  // 11:00 is outside the new 12:00-13:00 window
+}
+
+TEST(Pi18AcOutputTest, RearmStopsAfterThreeWritesThatDoNotTakeEffect) {
+  FakeUart uart;
+  TestablePipsolar inv;
+  inv.set_uart_parent(&uart);
+  TestSwitch sw;
+  inv.set_ac_output_switch(&sw);
+  inv.set_ac_output_keep_off(true);
+  set_inverter(inv, "0910", "0000", "0000");
+  inv.handle_p004t_(synthetic_clock("0910").c_str());  // the first reading with the window known
+  accept_queued_command(inv, uart);
+  for (const char *hhmm : {"0911", "0912", "0913", "0914", "0915"}) {
+    inv.handle_p007aclt_("^D0120000,0000");  // the reading shows the write didn't store
+    inv.handle_p004t_(synthetic_clock(hhmm).c_str());
+    accept_queued_command(inv, uart);
+  }
+  EXPECT_EQ(uart.count_sent("^S016ACLT"), 3u);
+  // A user request starts over
+  inv.handle_p007aclt_("^D0120000,0000");
+  EXPECT_EQ(inv.write_ac_output(false), WriteResult::QUEUED);
+  accept_queued_command(inv, uart);
+  EXPECT_EQ(uart.count_sent("^S016ACLT"), 4u);
+  inv.handle_p007aclt_("^D0120000,0000");
+  inv.handle_p004t_(synthetic_clock("0916").c_str());
+  accept_queued_command(inv, uart);
+  EXPECT_EQ(uart.count_sent("^S016ACLT"), 5u);
+}
+
+TEST(Pi18AcOutputTest, RearmCountResetsOnceTheWindowKeepsTheOutputOff) {
+  FakeUart uart;
+  TestablePipsolar inv;
+  inv.set_uart_parent(&uart);
+  TestSwitch sw;
+  inv.set_ac_output_switch(&sw);
+  inv.set_ac_output_keep_off(true);
+  set_inverter(inv, "0910", "0000", "0000");
+  inv.handle_p004t_(synthetic_clock("0910").c_str());
+  accept_queued_command(inv, uart);
+  inv.handle_p007aclt_("^D0120000,0000");
+  inv.handle_p004t_(synthetic_clock("0911").c_str());
+  accept_queued_command(inv, uart);
+  inv.handle_p007aclt_("^D0120800,0900");  // this one took
+  inv.handle_p004t_(synthetic_clock("0912").c_str());
+  EXPECT_EQ(queued_count(inv), 0u);
+  for (const char *hhmm : {"1010", "1011", "1012", "1013"}) {
+    inv.handle_p007aclt_("^D0120000,0000");
+    inv.handle_p004t_(synthetic_clock(hhmm).c_str());
+    accept_queued_command(inv, uart);
+  }
+  EXPECT_EQ(uart.count_sent("^S016ACLT"), 5u);  // 2 + 3, not 2 + 2
 }
 
 }  // namespace esphome::pi18::testing
