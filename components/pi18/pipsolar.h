@@ -244,6 +244,21 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
     this->add_polling_command_("^P004T", POLLING_P004T, PollSchedule::SLOW);
   }
 
+  // The AC output switch shows whether the AC output timer has the output on. It needs the clock,
+  // the output window and the warnings, so it registers their polls.
+  void set_ac_output_switch(switch_::Switch *sw);
+  // Turns the output on or off through the AC output timer, which the LV2424 accepts in whole
+  // hours only. Off writes the hour that just ended; On disables the timer. On is refused during
+  // the battery under shutdown warning, or before the first warnings reply.
+  WriteResult write_ac_output(bool on);
+  // On when the last ACLT reading has the output on at the inverter's clock; empty if either is unknown
+  esphome::optional<bool> get_ac_output_state() const;
+  // Output is on iff the timer is disabled (start == end) or the minute of day is in [start, end),
+  // which wraps past midnight when start > end. Times are hour * 100 + minute.
+  static bool window_contains(uint16_t start_hhmm, uint16_t end_hhmm, uint16_t minute_of_day);
+  // From the last ^P004T reading; empty until read
+  esphome::optional<uint16_t> get_inverter_minute_of_day() const { return this->inverter_minute_of_day_; }
+
   // "^S018DATyyMMddHHmmss" for a local time; empty when the time isn't valid
   static std::string clock_command(const ESPTime &now);
   // Queues the clock command and refreshes the clock reading. False when the time isn't
@@ -372,10 +387,16 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   // Publishes a window reading to both ends; it becomes the known value unless a write is outstanding
   void apply_time_window_(TimeWindowEnd start, uint16_t start_time, uint16_t end_time);
   void handle_time_window_(TimeWindowEnd start, const char *message);
+  // Queues one ^S016ACCT/ACLT command for both ends and records both as pending
+  WriteResult queue_window_(TimeWindowEnd start, uint16_t start_time, uint16_t end_time);
+  void publish_ac_output_state_();
   static esphome::optional<uint16_t> parse_time_(const char *text);
   static std::vector<int> parse_current_list_(const char *message);
 
   text_sensor::TextSensor *inverter_time_{};
+  switch_::Switch *ac_output_switch_{};
+  esphome::optional<uint16_t> inverter_minute_of_day_;
+  esphome::optional<bool> battery_under_shutdown_;  // from the last ^P006FWS reply
 
   void publish_mppt_status_(text_sensor::TextSensor *sensor, esphome::optional<int32_t> value);
   void publish_direction_(text_sensor::TextSensor *sensor, esphome::optional<int32_t> value);

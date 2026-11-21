@@ -28,6 +28,11 @@ static const char LV2424_P004T[] = "^D01720261120130618";
 static const char LV2424_P007ACCT[] = "^D0120000,0000";
 static const char LV2424_P007ACLT[] = "^D0120000,0000";
 
+// ── ^P006FWS ──────────────────────────────────────────────────────────────────
+//
+// Fault code 00, then 16 warning flags. Only EEPROM fail is on; everything else is off (CRC 3B 0C).
+static const char LV2424_P006FWS[] = "^D03700,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0";
+
 // ── ^P009MCHGCR / ^P010MUCHGCR ────────────────────────────────────────────────
 //
 // Allowed max charging currents: 10 A to 140 A in steps of 10 (CRC 21 6A)

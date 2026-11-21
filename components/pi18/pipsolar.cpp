@@ -504,6 +504,10 @@ ENUMPollingCommand window_poll(TimeWindowEnd end) {
   return is_charge_window(end) ? POLLING_P007ACCT : POLLING_P007ACLT;
 }
 
+constexpr uint16_t MINUTES_PER_DAY = 24 * 60;
+// Off is rewritten when the window would open within this many minutes
+constexpr uint16_t AC_OUTPUT_REARM_MINUTES = 60;
+
 }  // namespace
 
 void Pipsolar::set_time_window_end(TimeWindowEnd end, PipsolarTime *entity) {
@@ -547,6 +551,8 @@ void Pipsolar::apply_time_window_(TimeWindowEnd start, uint16_t start_time, uint
     state.value = readings[i];
     state.pending = false;
   }
+  if (start == TimeWindowEnd::AC_OUTPUT_START)
+    this->publish_ac_output_state_();
 }
 
 // "^D012hhmm,hhmm"
@@ -583,8 +589,7 @@ WriteResult Pipsolar::write_time_setting(TimeWindowEnd end, uint8_t hour, uint8_
     return WriteResult::UNCHANGED;
   }
   const TimeWindowEnd start = window_start_of(end);
-  const TimeWindowEnd finish = window_end_of(start);
-  const TimeWindowEnd partner = end == start ? finish : start;
+  const TimeWindowEnd partner = end == start ? window_end_of(start) : start;
   const auto partner_known = this->get_time_setting(partner);
   if (!partner_known.has_value()) {
     ESP_LOGW(TAG, "The other end of the window isn't known yet");
@@ -592,17 +597,96 @@ WriteResult Pipsolar::write_time_setting(TimeWindowEnd end, uint8_t hour, uint8_
   }
   const uint16_t start_time = end == start ? time : *partner_known;
   const uint16_t end_time = end == start ? *partner_known : time;
+  return this->queue_window_(start, start_time, end_time);
+}
+
+WriteResult Pipsolar::queue_window_(TimeWindowEnd start, uint16_t start_time, uint16_t end_time) {
   char command[32];
-  snprintf(command, sizeof(command), "^S016%s%04u,%04u", is_charge_window(end) ? "ACCT" : "ACLT",
+  snprintf(command, sizeof(command), "^S016%s%04u,%04u", is_charge_window(start) ? "ACCT" : "ACLT",
            static_cast<unsigned>(start_time), static_cast<unsigned>(end_time));
   if (!this->queue_command(command)) {
     ESP_LOGW(TAG, "Command queue full");
     return WriteResult::REJECTED;
   }
-  set_pending_(this->times_[static_cast<size_t>(end)], time);
-  set_pending_(this->times_[static_cast<size_t>(partner)], *partner_known);
-  this->request_poll_refresh(window_poll(end));
+  set_pending_(this->times_[static_cast<size_t>(start)], start_time);
+  set_pending_(this->times_[static_cast<size_t>(window_end_of(start))], end_time);
+  this->request_poll_refresh(window_poll(start));
   return WriteResult::QUEUED;
+}
+
+void Pipsolar::set_ac_output_switch(switch_::Switch *sw) {
+  this->ac_output_switch_ = sw;
+  this->add_polling_command_("^P004T", POLLING_P004T, PollSchedule::SLOW);
+  this->add_polling_command_("^P007ACLT", POLLING_P007ACLT, PollSchedule::SLOW);
+  this->add_polling_command_("^P006FWS", POLLING_P006FWS);
+}
+
+bool Pipsolar::window_contains(uint16_t start_hhmm, uint16_t end_hhmm, uint16_t minute_of_day) {
+  if (start_hhmm == end_hhmm)
+    return true;
+  const uint16_t start = start_hhmm / 100 * 60 + start_hhmm % 100;
+  const uint16_t end = end_hhmm / 100 * 60 + end_hhmm % 100;
+  if (start < end)
+    return minute_of_day >= start && minute_of_day < end;
+  return minute_of_day >= start || minute_of_day < end;
+}
+
+esphome::optional<bool> Pipsolar::get_ac_output_state() const {
+  const auto start = this->get_time_reading(TimeWindowEnd::AC_OUTPUT_START);
+  const auto end = this->get_time_reading(TimeWindowEnd::AC_OUTPUT_END);
+  if (!start.has_value() || !end.has_value() || !this->inverter_minute_of_day_.has_value())
+    return {};
+  return window_contains(*start, *end, *this->inverter_minute_of_day_);
+}
+
+void Pipsolar::publish_ac_output_state_() {
+  if (this->ac_output_switch_ == nullptr)
+    return;
+  const auto state = this->get_ac_output_state();
+  if (state.has_value())
+    this->ac_output_switch_->publish_state(*state);
+}
+
+WriteResult Pipsolar::write_ac_output(bool on) {
+  const auto start = this->get_time_setting(TimeWindowEnd::AC_OUTPUT_START);
+  const auto end = this->get_time_setting(TimeWindowEnd::AC_OUTPUT_END);
+  if (!start.has_value() || !end.has_value()) {
+    ESP_LOGW(TAG, "The AC output window isn't known yet");
+    return WriteResult::REJECTED;
+  }
+  const bool disabled = *start == *end;
+  const auto minute = this->inverter_minute_of_day_;
+  if (on) {
+    if (disabled || (minute.has_value() && window_contains(*start, *end, *minute))) {
+      ESP_LOGD(TAG, "The AC output timer already has the output on");
+      return WriteResult::UNCHANGED;
+    }
+    if (!minute.has_value()) {
+      ESP_LOGW(TAG, "The inverter's time isn't known yet");
+      return WriteResult::REJECTED;
+    }
+    if (!this->battery_under_shutdown_.has_value()) {
+      ESP_LOGW(TAG, "Not turning the AC output on: the warnings haven't been read yet");
+      return WriteResult::REJECTED;
+    }
+    if (*this->battery_under_shutdown_) {
+      ESP_LOGW(TAG, "Not turning the AC output on: the battery is under shutdown voltage");
+      return WriteResult::REJECTED;
+    }
+    return this->queue_window_(TimeWindowEnd::AC_OUTPUT_START, 0, 0);
+  }
+  if (!minute.has_value()) {
+    ESP_LOGW(TAG, "The inverter's time isn't known yet");
+    return WriteResult::REJECTED;
+  }
+  const uint16_t start_minute = *start / 100 * 60 + *start % 100;
+  const bool opens_soon = (start_minute + MINUTES_PER_DAY - *minute) % MINUTES_PER_DAY <= AC_OUTPUT_REARM_MINUTES;
+  if (!disabled && !window_contains(*start, *end, *minute) && !opens_soon) {
+    ESP_LOGD(TAG, "The AC output timer already keeps the output off");
+    return WriteResult::UNCHANGED;
+  }
+  const uint16_t hour = *minute / 60;
+  return this->queue_window_(TimeWindowEnd::AC_OUTPUT_START, (hour + 23) % 24 * 100, hour * 100);
 }
 
 std::vector<int> Pipsolar::parse_current_list_(const char *message) {
@@ -682,8 +766,6 @@ void Pipsolar::handle_poll_error_(ENUMPollingCommand polling_command) {
 }
 
 void Pipsolar::handle_p004t_(const char *message) {
-  if (this->inverter_time_ == nullptr)
-    return;
   // "^D017" and 14 digits: yyyyMMddHHmmss
   constexpr size_t PREFIX_LENGTH = 5;
   constexpr size_t DIGITS = 14;
@@ -694,9 +776,16 @@ void Pipsolar::handle_p004t_(const char *message) {
     if (d[i] < '0' || d[i] > '9')
       return;
   }
-  char text[20];
-  snprintf(text, sizeof(text), "%.4s-%.2s-%.2s %.2s:%.2s:%.2s", d, d + 4, d + 6, d + 8, d + 10, d + 12);
-  this->inverter_time_->publish_state(text);
+  const uint16_t hour = (d[8] - '0') * 10 + (d[9] - '0');
+  const uint16_t minute = (d[10] - '0') * 10 + (d[11] - '0');
+  if (hour <= 23 && minute <= 59)
+    this->inverter_minute_of_day_ = hour * 60 + minute;
+  if (this->inverter_time_ != nullptr) {
+    char text[20];
+    snprintf(text, sizeof(text), "%.4s-%.2s-%.2s %.2s:%.2s:%.2s", d, d + 4, d + 6, d + 8, d + 10, d + 12);
+    this->inverter_time_->publish_state(text);
+  }
+  this->publish_ac_output_state_();
 }
 
 std::string Pipsolar::clock_command(const ESPTime &now) {
@@ -1045,8 +1134,14 @@ void Pipsolar::handle_p006fws_(const char *message) {
       this->warning_scc2_battery_too_low_to_charge_,
   };
   // Firmwares that report fewer warnings leave the remaining sensors unknown instead of off
-  for (auto *sensor : warn_sensors)
-    this->publish_binary_sensor_(this->read_flag_(message, &pos), sensor);
+  constexpr size_t BATTERY_UNDER_SHUTDOWN = 6;
+  size_t flag = 0;
+  for (auto *sensor : warn_sensors) {
+    const auto warning = this->read_flag_(message, &pos);
+    if (flag++ == BATTERY_UNDER_SHUTDOWN)
+      this->battery_under_shutdown_ = warning;
+    this->publish_binary_sensor_(warning, sensor);
+  }
 
   // Field 17: battery connection is open (SolarPower code 1056). Firmware that sends
   // only 17 fields leaves the sensor unknown.
