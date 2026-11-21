@@ -671,7 +671,10 @@ WriteResult Pipsolar::write_ac_output_(bool on) {
   const bool disabled = *start == *end;
   const auto minute = this->inverter_minute_of_day_;
   if (on) {
-    if (disabled || (minute.has_value() && window_contains(*start, *end, *minute))) {
+    // While keep off is set the window is the switch's own, so On removes it even when the clock
+    // sits inside it: otherwise the output would go off again at the next hour.
+    const bool own_window = this->ac_output_keep_off_ && !disabled;
+    if (disabled || (!own_window && minute.has_value() && window_contains(*start, *end, *minute))) {
       ESP_LOGD(TAG, "The AC output timer already has the output on");
       return WriteResult::UNCHANGED;
     }
@@ -1158,6 +1161,8 @@ void Pipsolar::publish_fault_description_(int fault_code) {
 void Pipsolar::handle_p006fws_(const char *message) {
   if (this->last_p005fws_)
     this->last_p005fws_->publish_state(message);
+  // A failed poll blocks On until a good reply arrives
+  this->battery_under_shutdown_.reset();
   if (strlen(message) < 6)
     return;
 

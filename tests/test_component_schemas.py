@@ -407,6 +407,13 @@ class TestPi18AcOutputSwitch:
         # "Keep off" has its own preference; ESPHome's restore would save the timer reading
         assert str(self._schema()(self._config())["restore_mode"]) == "DISABLED"
 
+    def test_other_restore_modes_are_rejected(self):
+        with pytest.raises(cv.Invalid, match="restore_mode must be DISABLED"):
+            self._schema()(self._config(restore_mode="RESTORE_DEFAULT_ON"))
+
+    def test_disabled_restore_mode_is_accepted(self):
+        self._schema()(self._config(restore_mode="DISABLED"))
+
 
 class TestPi18OutputTypes:
     def test_command_templates_format_the_float_level(self):

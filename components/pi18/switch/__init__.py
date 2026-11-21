@@ -1,7 +1,7 @@
 import esphome.codegen as cg
 from esphome.components import switch
 import esphome.config_validation as cv
-from esphome.const import ICON_POWER
+from esphome.const import CONF_RESTORE_MODE, ICON_POWER
 
 from .. import CONF_PIPSOLAR_ID, PIPSOLAR_COMPONENT_SCHEMA, pipsolar_ns
 from ..const import (
@@ -51,14 +51,27 @@ PIPSWITCH_SCHEMA = switch.switch_schema(
     PipsolarSwitch, icon=ICON_POWER, block_inverted=True
 ).extend(cv.COMPONENT_SCHEMA)
 
+
+def _restore_mode_disabled(config):
+    if str(config[CONF_RESTORE_MODE]) != "DISABLED":
+        raise cv.Invalid(
+            "ac_output keeps its own 'keep off' setting; restore_mode must be DISABLED"
+        )
+    return config
+
+
 # "Keep off" has its own preference, so ESPHome's switch restore is disabled: it would save
 # the timer reading the switch publishes instead of the request.
-AC_OUTPUT_SCHEMA = switch.switch_schema(
-    PipsolarAcOutputSwitch,
-    icon="mdi:power-socket-us",
-    block_inverted=True,
-    default_restore_mode="DISABLED",
-).extend(cv.COMPONENT_SCHEMA)
+AC_OUTPUT_SCHEMA = (
+    switch.switch_schema(
+        PipsolarAcOutputSwitch,
+        icon="mdi:power-socket-us",
+        block_inverted=True,
+        default_restore_mode="DISABLED",
+    )
+    .extend(cv.COMPONENT_SCHEMA)
+    .add_extra(_restore_mode_disabled)
+)
 
 # ^S006PEI/PDI isn't power saving: MPP Solar's SolarPower uses flag I for the machine
 # type (Hybrid/Off-grid, PIRI field 20), and never reads FLAG field 8.

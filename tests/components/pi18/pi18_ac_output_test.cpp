@@ -435,4 +435,29 @@ TEST(Pi18AcOutputTest, RearmCountResetsOnceTheWindowKeepsTheOutputOff) {
   EXPECT_EQ(uart.count_sent("^S016ACLT"), 5u);  // 2 + 3, not 2 + 2
 }
 
+TEST(Pi18AcOutputTest, OnWhileKeepOffRemovesTheSwitchsOwnWindowEvenWithTheClockInsideIt) {
+  TestablePipsolar inv;
+  TestSwitch sw;
+  inv.set_ac_output_switch(&sw);
+  inv.handle_p006fws_(LV2424_P006FWS);
+  set_inverter(inv, "1230", "1200", "1300");
+  inv.set_ac_output_keep_off(true);
+  EXPECT_EQ(inv.write_ac_output(true), WriteResult::QUEUED);
+  EXPECT_EQ(inv.queued_command(), "^S016ACLT0000,0000");
+  EXPECT_FALSE(inv.get_ac_output_keep_off());
+}
+
+TEST(Pi18AcOutputTest, OnRejectedAfterAFailedFwsPoll) {
+  TestablePipsolar inv;
+  TestSwitch sw;
+  inv.set_ac_output_switch(&sw);
+  set_inverter(inv, "1306", "1200", "1300");
+  inv.handle_p006fws_(LV2424_P006FWS);
+  inv.handle_p006fws_("^D0");  // short reply
+  EXPECT_EQ(inv.write_ac_output(true), WriteResult::REJECTED);
+  EXPECT_EQ(queued_count(inv), 0u);
+  inv.handle_p006fws_(LV2424_P006FWS);
+  EXPECT_EQ(inv.write_ac_output(true), WriteResult::QUEUED);
+}
+
 }  // namespace esphome::pi18::testing
