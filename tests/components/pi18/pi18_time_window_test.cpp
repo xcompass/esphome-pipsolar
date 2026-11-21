@@ -167,7 +167,7 @@ TEST(Pi18TimeWindowTest, ReadingBeforeTheWriteIsSentDoesNotUndoIt) {
   EXPECT_EQ(*inv.get_time_setting(TimeWindowEnd::AC_CHARGE_START), 2200);
   // Writing the same value again sends nothing
   EXPECT_EQ(inv.write_time_setting(TimeWindowEnd::AC_CHARGE_START, 22, 0), WriteResult::UNCHANGED);
-  // The partner is sent as already known, so the end write after the start keeps 22:30
+  // The partner is sent as already known, so the end write after the start keeps 22:00
   EXPECT_EQ(inv.write_time_setting(TimeWindowEnd::AC_CHARGE_END, 7, 0), WriteResult::QUEUED);
   EXPECT_EQ(inv.queued_command(1), "^S016ACCT2200,0700");
 }
