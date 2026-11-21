@@ -5,6 +5,7 @@ from esphome.const import ICON_POWER
 
 from .. import CONF_PIPSOLAR_ID, PIPSOLAR_COMPONENT_SCHEMA, pipsolar_ns
 from ..const import (
+    CONF_AC_OUTPUT,
     CONF_ALARM_ON_WHEN_PRIMARY_SOURCE_INTERRUPT,
     CONF_BACKLIGHT_ON,
     CONF_FAULT_CODE_RECORD,
@@ -42,8 +43,21 @@ TYPES = {
 
 PipsolarSwitch = pipsolar_ns.class_("PipsolarSwitch", switch.Switch, cg.Component)
 
+PipsolarAcOutputSwitch = pipsolar_ns.class_(
+    "PipsolarAcOutputSwitch", switch.Switch, cg.Component
+)
+
 PIPSWITCH_SCHEMA = switch.switch_schema(
     PipsolarSwitch, icon=ICON_POWER, block_inverted=True
+).extend(cv.COMPONENT_SCHEMA)
+
+# "Keep off" has its own preference, so ESPHome's switch restore is disabled: it would save
+# the timer reading the switch publishes instead of the request.
+AC_OUTPUT_SCHEMA = switch.switch_schema(
+    PipsolarAcOutputSwitch,
+    icon="mdi:power-socket-us",
+    block_inverted=True,
+    default_restore_mode="DISABLED",
 ).extend(cv.COMPONENT_SCHEMA)
 
 # ^S006PEI/PDI isn't power saving: MPP Solar's SolarPower uses flag I for the machine
@@ -56,7 +70,12 @@ POWER_SAVING_REMOVED = (
 
 CONFIG_SCHEMA = PIPSOLAR_COMPONENT_SCHEMA.extend(
     {cv.Optional(type): PIPSWITCH_SCHEMA for type in TYPES}
-).extend({cv.Optional(CONF_POWER_SAVING): cv.invalid(POWER_SAVING_REMOVED)})
+).extend(
+    {
+        cv.Optional(CONF_AC_OUTPUT): AC_OUTPUT_SCHEMA,
+        cv.Optional(CONF_POWER_SAVING): cv.invalid(POWER_SAVING_REMOVED),
+    }
+)
 
 
 async def to_code(config):
@@ -72,3 +91,10 @@ async def to_code(config):
             cg.add(var.set_on_command(on))
             if off is not None:
                 cg.add(var.set_off_command(off))
+
+    if CONF_AC_OUTPUT in config:
+        conf = config[CONF_AC_OUTPUT]
+        var = await switch.new_switch(conf)
+        await cg.register_component(var, conf)
+        cg.add(var.set_parent(paren))
+        cg.add(paren.set_ac_output_switch(var))

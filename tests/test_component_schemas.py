@@ -359,6 +359,7 @@ from components.pi18 import (  # noqa: E402
     switch as pi18_switch,
 )
 from components.pi18.const import (  # noqa: E402
+    CONF_AC_OUTPUT,
     CONF_BATTERY_BULK_VOLTAGE,
     CONF_BATTERY_FLOAT_VOLTAGE,
     CONF_POWER_SAVING,
@@ -385,6 +386,26 @@ class TestPi18SwitchTypes:
         validator = _schema_validator(pi18_switch.CONFIG_SCHEMA, CONF_POWER_SAVING)
         with pytest.raises(cv.Invalid, match="machine type"):
             validator({})
+
+
+class TestPi18AcOutputSwitch:
+    def _schema(self):
+        return _schema_validator(pi18_switch.CONFIG_SCHEMA, CONF_AC_OUTPUT)
+
+    def _config(self, **extra):
+        return {"name": f"AC Output {next(_entity_names)}", **extra}
+
+    def test_ac_output_is_accepted(self):
+        config = self._config()
+        assert self._schema()(config)["name"] == config["name"]
+
+    def test_inverted_is_rejected(self):
+        with pytest.raises(cv.Invalid, match="Inverted"):
+            self._schema()(self._config(inverted=True))
+
+    def test_default_restore_mode_is_disabled(self):
+        # "Keep off" has its own preference; ESPHome's restore would save the timer reading
+        assert str(self._schema()(self._config())["restore_mode"]) == "DISABLED"
 
 
 class TestPi18OutputTypes:
