@@ -1,0 +1,25 @@
+--- a/SerialPort.java
++++ b/SerialPort.java
+@@ -303,7 +303,21 @@
+ 	 *
+ 	 * @return An array of {@link SerialPort} objects.
+ 	 */
+-	static public native SerialPort[] getCommPorts();
++	// Patched for running SolarPower over a network serial bridge: list only the ports named
++	// in -Dsolarpower.onlyPorts (comma-separated paths), so the app never probes other devices.
++	static public SerialPort[] getCommPorts()
++	{
++		String only = System.getProperty("solarpower.onlyPorts", "");
++		java.util.ArrayList<SerialPort> ports = new java.util.ArrayList<SerialPort>();
++		for (String path : only.split(","))
++		{
++			if (path.trim().isEmpty())
++				continue;
++			try { ports.add(getCommPort(path.trim())); }
++			catch (Exception e) { }
++		}
++		return ports.toArray(new SerialPort[0]);
++	}
+
+ 	/**
+ 	 * Allocates a {@link SerialPort} object corresponding to the user-specified port descriptor.
