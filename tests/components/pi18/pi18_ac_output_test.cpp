@@ -36,6 +36,21 @@ void set_inverter(TestablePipsolar &inv, const char *hhmm, const char *start, co
   inv.handle_p007aclt_(synthetic_window(start, end).c_str());
 }
 
+size_t aclt_count(const TestablePipsolar &inv) {
+  size_t count = 0;
+  for (size_t i = 0; i < 10; i++)
+    count += inv.queued_command(i).rfind("^S016ACLT", 0) == 0 ? 1 : 0;
+  return count;
+}
+
+std::string aclt_command(const TestablePipsolar &inv) {
+  for (size_t i = 0; i < 10; i++) {
+    if (inv.queued_command(i).rfind("^S016ACLT", 0) == 0)
+      return inv.queued_command(i);
+  }
+  return "";
+}
+
 }  // namespace
 
 TEST(Pi18AcOutputTest, RegistersClockWindowAndWarningPolls) {
@@ -209,6 +224,109 @@ TEST(Pi18AcOutputTest, WindowTimeEntityStillWritesBothEnds) {
   inv.handle_p007aclt_("^D0121200,1300");
   EXPECT_EQ(inv.write_time_setting(TimeWindowEnd::AC_OUTPUT_START, 5, 0), WriteResult::QUEUED);
   EXPECT_EQ(inv.queued_command(), "^S016ACLT0500,1300");
+}
+
+TEST(Pi18AcOutputTest, RearmMovesTheWindowAnHourBeforeItOpens) {
+  TestablePipsolar inv;
+  TestSwitch sw;
+  inv.set_ac_output_switch(&sw);
+  inv.set_ac_output_keep_off(true);
+  set_inverter(inv, "1030", "1200", "1300");
+  EXPECT_EQ(queued_count(inv), 0u);
+  inv.handle_p004t_(synthetic_clock("1100").c_str());
+  EXPECT_EQ(inv.queued_command(), "^S016ACLT1000,1100");
+  EXPECT_EQ(queued_count(inv), 1u);
+}
+
+TEST(Pi18AcOutputTest, ClockJumpIntoWindowRearms) {
+  TestablePipsolar inv;
+  TestSwitch sw;
+  inv.set_ac_output_switch(&sw);
+  inv.set_ac_output_keep_off(true);
+  set_inverter(inv, "1030", "1200", "1300");
+  inv.handle_p004t_(synthetic_clock("1230").c_str());
+  EXPECT_EQ(inv.queued_command(), "^S016ACLT1100,1200");
+}
+
+TEST(Pi18AcOutputTest, KeepOffOverridesHandSetWindow) {
+  TestablePipsolar inv;
+  TestSwitch sw;
+  inv.set_ac_output_switch(&sw);
+  inv.set_ac_output_keep_off(true);
+  inv.handle_p007aclt_("^D0120000,0000");
+  inv.handle_p004t_(synthetic_clock("0910").c_str());
+  EXPECT_EQ(inv.queued_command(), "^S016ACLT0800,0900");
+}
+
+TEST(Pi18AcOutputTest, KeepOffClearedLeavesHandSetWindowAlone) {
+  TestablePipsolar inv;
+  TestSwitch sw;
+  inv.set_ac_output_switch(&sw);
+  inv.handle_p006fws_(LV2424_P006FWS);
+  set_inverter(inv, "1306", "1200", "1300");
+  EXPECT_EQ(inv.write_ac_output(false), WriteResult::UNCHANGED);
+  EXPECT_TRUE(inv.get_ac_output_keep_off());
+  EXPECT_EQ(inv.write_ac_output(true), WriteResult::QUEUED);
+  EXPECT_FALSE(inv.get_ac_output_keep_off());
+  inv.handle_p007aclt_(synthetic_window("0800", "0900").c_str());
+  inv.handle_p004t_(synthetic_clock("0830").c_str());
+  inv.handle_p004t_(synthetic_clock("1100").c_str());
+  EXPECT_EQ(queued_count(inv), 1u);  // only the On write
+  EXPECT_EQ(inv.queued_command(), "^S016ACLT0000,0000");
+}
+
+TEST(Pi18AcOutputTest, RejectedWriteLeavesKeepOffAsItWas) {
+  TestablePipsolar inv;
+  TestSwitch sw;
+  inv.set_ac_output_switch(&sw);
+  inv.set_ac_output_keep_off(true);
+  EXPECT_EQ(inv.write_ac_output(true), WriteResult::REJECTED);  // window unknown
+  EXPECT_TRUE(inv.get_ac_output_keep_off());
+}
+
+TEST(Pi18AcOutputTest, RestoredKeepOffWritesNothingWhileWindowIsFar) {
+  TestablePipsolar inv;
+  TestSwitch sw;
+  inv.set_ac_output_switch(&sw);
+  inv.set_ac_output_keep_off(true);
+  EXPECT_EQ(queued_count(inv), 0u);
+  set_inverter(inv, "1400", "1200", "1300");
+  EXPECT_EQ(queued_count(inv), 0u);
+}
+
+TEST(Pi18AcOutputTest, NoRearmWhileWindowWriteOutstanding) {
+  TestablePipsolar inv;
+  TestSwitch sw;
+  inv.set_ac_output_switch(&sw);
+  inv.set_ac_output_keep_off(true);
+  set_inverter(inv, "1030", "1200", "1300");
+  EXPECT_EQ(inv.write_time_setting(TimeWindowEnd::AC_OUTPUT_START, 11, 0), WriteResult::QUEUED);
+  inv.handle_p004t_(synthetic_clock("1100").c_str());
+  EXPECT_EQ(aclt_count(inv), 1u);
+}
+
+TEST(Pi18AcOutputTest, RefusedOffRetriesOncePerClockReading) {
+  FakeUart uart;
+  TestablePipsolar inv;
+  inv.set_uart_parent(&uart);
+  TestSwitch sw;
+  inv.set_ac_output_switch(&sw);
+  set_inverter(inv, "0910", "0000", "0000");
+  EXPECT_EQ(inv.write_ac_output(false), WriteResult::QUEUED);
+  EXPECT_EQ(inv.queued_command(), "^S016ACLT0800,0900");
+  for (int i = 0; i < 12; i++) {
+    inv.loop();
+    uart.receive(inv.reply("^0"));  // refused
+    inv.run(uart, 6);
+  }
+  EXPECT_EQ(uart.count_sent("^S016ACLT0800,0900"), 1u);
+  EXPECT_EQ(aclt_count(inv), 0u);
+  inv.handle_p007aclt_("^D0120000,0000");  // the reading shows it didn't take
+  EXPECT_TRUE(inv.get_ac_output_keep_off());
+  EXPECT_EQ(aclt_count(inv), 0u);  // nothing until the next clock reading
+  inv.handle_p004t_(synthetic_clock("0911").c_str());
+  EXPECT_EQ(aclt_count(inv), 1u);
+  EXPECT_EQ(aclt_command(inv), "^S016ACLT0800,0900");
 }
 
 }  // namespace esphome::pi18::testing

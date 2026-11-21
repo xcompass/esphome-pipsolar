@@ -648,6 +648,13 @@ void Pipsolar::publish_ac_output_state_() {
 }
 
 WriteResult Pipsolar::write_ac_output(bool on) {
+  const WriteResult result = this->write_ac_output_(on);
+  if (result == WriteResult::QUEUED || result == WriteResult::UNCHANGED)
+    this->ac_output_keep_off_ = !on;
+  return result;
+}
+
+WriteResult Pipsolar::write_ac_output_(bool on) {
   const auto start = this->get_time_setting(TimeWindowEnd::AC_OUTPUT_START);
   const auto end = this->get_time_setting(TimeWindowEnd::AC_OUTPUT_END);
   if (!start.has_value() || !end.has_value()) {
@@ -679,14 +686,33 @@ WriteResult Pipsolar::write_ac_output(bool on) {
     ESP_LOGW(TAG, "The inverter's time isn't known yet");
     return WriteResult::REJECTED;
   }
-  const uint16_t start_minute = *start / 100 * 60 + *start % 100;
-  const bool opens_soon = (start_minute + MINUTES_PER_DAY - *minute) % MINUTES_PER_DAY <= AC_OUTPUT_REARM_MINUTES;
-  if (!disabled && !window_contains(*start, *end, *minute) && !opens_soon) {
+  return this->write_ac_output_off_(*start, *end, *minute);
+}
+
+WriteResult Pipsolar::write_ac_output_off_(uint16_t start, uint16_t end, uint16_t minute) {
+  const bool disabled = start == end;
+  const uint16_t start_minute = start / 100 * 60 + start % 100;
+  const bool opens_soon = (start_minute + MINUTES_PER_DAY - minute) % MINUTES_PER_DAY <= AC_OUTPUT_REARM_MINUTES;
+  if (!disabled && !window_contains(start, end, minute) && !opens_soon) {
     ESP_LOGD(TAG, "The AC output timer already keeps the output off");
     return WriteResult::UNCHANGED;
   }
-  const uint16_t hour = *minute / 60;
+  const uint16_t hour = minute / 60;
   return this->queue_window_(TimeWindowEnd::AC_OUTPUT_START, (hour + 23) % 24 * 100, hour * 100);
+}
+
+void Pipsolar::rearm_ac_output_() {
+  if (!this->ac_output_keep_off_)
+    return;
+  const auto start = this->get_time_setting(TimeWindowEnd::AC_OUTPUT_START);
+  const auto end = this->get_time_setting(TimeWindowEnd::AC_OUTPUT_END);
+  if (!start.has_value() || !end.has_value() || !this->inverter_minute_of_day_.has_value())
+    return;
+  if (this->write_outstanding() || this->times_[static_cast<size_t>(TimeWindowEnd::AC_OUTPUT_START)].pending ||
+      this->times_[static_cast<size_t>(TimeWindowEnd::AC_OUTPUT_END)].pending)
+    return;
+  if (this->write_ac_output_off_(*start, *end, *this->inverter_minute_of_day_) == WriteResult::QUEUED)
+    ESP_LOGI(TAG, "Re-armed the AC output off window");
 }
 
 std::vector<int> Pipsolar::parse_current_list_(const char *message) {
@@ -786,6 +812,7 @@ void Pipsolar::handle_p004t_(const char *message) {
     this->inverter_time_->publish_state(text);
   }
   this->publish_ac_output_state_();
+  this->rearm_ac_output_();
 }
 
 std::string Pipsolar::clock_command(const ESPTime &now) {

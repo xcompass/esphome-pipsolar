@@ -251,6 +251,10 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   // hours only. Off writes the hour that just ended; On disables the timer. On is refused during
   // the battery under shutdown warning, or before the first warnings reply.
   WriteResult write_ac_output(bool on);
+  // While set, each ^P004T reading re-arms the off window when it contains the inverter's time or
+  // opens within the hour. Set by write_ac_output (QUEUED or UNCHANGED); never writes by itself.
+  void set_ac_output_keep_off(bool keep_off) { this->ac_output_keep_off_ = keep_off; }
+  bool get_ac_output_keep_off() const { return this->ac_output_keep_off_; }
   // On when the last ACLT reading has the output on at the inverter's clock; empty if either is unknown
   esphome::optional<bool> get_ac_output_state() const;
   // Output is on iff the timer is disabled (start == end) or the minute of day is in [start, end),
@@ -390,12 +394,19 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   // Queues one ^S016ACCT/ACLT command for both ends and records both as pending
   WriteResult queue_window_(TimeWindowEnd start, uint16_t start_time, uint16_t end_time);
   void publish_ac_output_state_();
+  WriteResult write_ac_output_(bool on);
+  // Writes the hour that just ended as the off window, unless the window already keeps the output
+  // off for the next hour. Shared by the Off request and the re-arm.
+  WriteResult write_ac_output_off_(uint16_t start, uint16_t end, uint16_t minute);
+  // Runs once per ^P004T reading while keep off is set; skipped while a window write is outstanding
+  void rearm_ac_output_();
   static esphome::optional<uint16_t> parse_time_(const char *text);
   static std::vector<int> parse_current_list_(const char *message);
 
   text_sensor::TextSensor *inverter_time_{};
   switch_::Switch *ac_output_switch_{};
   esphome::optional<uint16_t> inverter_minute_of_day_;
+  bool ac_output_keep_off_{false};
   esphome::optional<bool> battery_under_shutdown_;  // from the last ^P006FWS reply
 
   void publish_mppt_status_(text_sensor::TextSensor *sensor, esphome::optional<int32_t> value);
