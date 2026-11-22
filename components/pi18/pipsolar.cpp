@@ -52,9 +52,11 @@ void Pipsolar::loop() {
     switch (this->parse_command_reply_(this->read_buffer_, this->read_pos_)) {
       case 1:
         ESP_LOGI(TAG, "command %s accepted", command);
+        this->replied_this_interval_ = true;
         break;
       case 0:
         ESP_LOGW(TAG, "command %s refused", command);
+        this->replied_this_interval_ = true;
         break;
       default:
         ESP_LOGW(TAG, "command %s: invalid reply (%zu bytes)", command, this->read_pos_);
@@ -75,6 +77,7 @@ void Pipsolar::loop() {
 
   if (this->state_ == STATE_POLL_COMPLETE) {
     if (this->check_incoming_crc_()) {
+      this->replied_this_interval_ = true;
       // A PI18 inverter refuses a query it doesn't support with ^0 (PI30 sends (NAK)
       const bool refused = (this->read_pos_ == 5 && this->read_buffer_[0] == '^' && this->read_buffer_[1] == '0') ||
                            (this->read_buffer_[0] == '(' && this->read_buffer_[1] == 'N' &&
@@ -1293,8 +1296,13 @@ void Pipsolar::update() {
   const uint32_t interval_ms = std::max<uint32_t>(this->get_update_interval(), 1);
   const uint32_t interval_updates = std::max<uint32_t>(1, SLOW_POLL_INTERVAL_MS / interval_ms);
   const bool new_interval = ++this->updates_in_interval_ >= interval_updates;
-  if (new_interval)
+  // A query only counts as unsupported when it fails while the inverter answers others. When
+  // nothing answers, the inverter is off (it powers down at dusk in standby) or the link is down.
+  const bool inverter_replied = this->replied_this_interval_;
+  if (new_interval) {
     this->updates_in_interval_ = 0;
+    this->replied_this_interval_ = false;
+  }
 
   for (auto &poll : this->enabled_polling_commands_) {
     if (poll.length == 0)
@@ -1308,7 +1316,8 @@ void Pipsolar::update() {
       continue;
     if (poll.schedule == PollSchedule::ONCE && poll.answered)
       continue;
-    if (poll.sent && !poll.answered && !poll.ever_answered && ++poll.failed_intervals >= UNSUPPORTED_AFTER_INTERVALS) {
+    if (poll.sent && !poll.answered && !poll.ever_answered && inverter_replied &&
+        ++poll.failed_intervals >= UNSUPPORTED_AFTER_INTERVALS) {
       ESP_LOGW(TAG, "%s not supported by this inverter, no longer polled", poll.command);
       poll.unsupported = true;
       poll.needs_update = false;

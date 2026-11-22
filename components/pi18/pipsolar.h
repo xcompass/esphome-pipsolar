@@ -345,7 +345,8 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   static const size_t COMMAND_TIMEOUT = 5000;
   static const size_t POLLING_COMMANDS_MAX = 16;
   static const uint32_t SLOW_POLL_INTERVAL_MS = 60000;
-  // A SLOW or ONCE poll that fails this many intervals in a row is dropped until reboot
+  // A SLOW or ONCE poll that fails this many intervals in a row, while the inverter answers other
+  // queries, is dropped until reboot
   static const uint8_t UNSUPPORTED_AFTER_INTERVALS = 3;
   // Like SolarPower, a poll the inverter refuses is tried at most this often per update
   static const uint8_t POLL_ATTEMPTS_MAX = 3;
@@ -457,6 +458,9 @@ class Pipsolar : public uart::UARTDevice, public PollingComponent {
   uint32_t command_start_millis_ = 0;
   uint32_t command_timeout_ms_ = COMMAND_TIMEOUT;  // only tests change it
   uint32_t updates_in_interval_ = 0;
+  // The inverter replied to a poll or command (answer or ^0) since the slow interval began.
+  // Without that, a failed SLOW or ONCE poll says nothing about whether it is supported.
+  bool replied_this_interval_ = false;
   uint8_t state_ = 0;  // STATE_IDLE
   enum State {
     STATE_IDLE = 0,

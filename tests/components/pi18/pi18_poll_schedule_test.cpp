@@ -8,6 +8,7 @@ namespace {
 constexpr uint32_t UPDATE_INTERVAL_MS = 30000;  // 2 updates make one slow interval
 constexpr const char *SLOW_POLL = "^P004T";
 constexpr const char *STATUS_POLL = "^P006MOD";
+constexpr const char *ONCE_POLL = "^P009MCHGCR";
 
 struct Fixture {
   FakeUart uart;
@@ -29,6 +30,16 @@ struct Fixture {
   void answer_every_poll(const std::string &text, int loops = 12) {
     for (int i = 0; i < loops; i++) {
       this->uart.receive(this->inv.reply(text));
+      this->inv.loop();
+    }
+  }
+
+  // Answers every poll except `silent`, which is left to time out
+  void answer_all_but(ENUMPollingCommand silent, int loops = 24) {
+    for (int i = 0; i < loops; i++) {
+      if (this->inv.polling() && this->inv.polling_identifier() != silent)
+        this->uart.receive(this->inv.reply("^D0050"));
+      delay(2);
       this->inv.loop();
     }
   }
@@ -138,6 +149,39 @@ TEST(Pi18PollScheduleTest, AnswerResetsTheFailedIntervalCount) {
   f.one_interval();
   f.answer_every_poll("^D0050");
   EXPECT_GT(f.uart.count_sent(SLOW_POLL), sent);
+}
+
+// The ESP32 restarting while the inverter is off (it powers down at dusk in standby) must not
+// drop queries the inverter supports: silence on every query says nothing about one of them
+TEST(Pi18PollScheduleTest, PollsAreKeptWhileTheInverterAnswersNothing) {
+  Fixture f;
+  f.add(SLOW_POLL, POLLING_P004T, PollSchedule::SLOW);
+  f.add(ONCE_POLL, POLLING_P009MCHGCR, PollSchedule::ONCE);
+  for (int i = 0; i < 6; i++) {  // twice UNSUPPORTED_AFTER_INTERVALS
+    f.run_unanswered();
+    f.one_interval();
+  }
+  const size_t slow = f.uart.count_sent(SLOW_POLL);
+  const size_t once = f.uart.count_sent(ONCE_POLL);
+  f.answer_every_poll("^D0050");  // the inverter comes on
+  EXPECT_GT(f.uart.count_sent(SLOW_POLL), slow);
+  EXPECT_GT(f.uart.count_sent(ONCE_POLL), once);
+}
+
+TEST(Pi18PollScheduleTest, PollTimingOutWhileOthersAnswerIsDropped) {
+  Fixture f;
+  f.add(SLOW_POLL, POLLING_P004T, PollSchedule::SLOW);
+  for (int i = 0; i < 3; i++) {
+    f.answer_all_but(POLLING_P004T);
+    f.one_interval();
+  }
+  const size_t sent = f.uart.count_sent(SLOW_POLL);
+  for (int i = 0; i < 3; i++) {
+    f.answer_all_but(POLLING_P004T);
+    f.one_interval();
+  }
+  EXPECT_EQ(f.uart.count_sent(SLOW_POLL), sent);
+  EXPECT_EQ(f.uart.count_sent(STATUS_POLL), 6u);  // one per interval, each answered
 }
 
 }  // namespace esphome::pi18::testing
