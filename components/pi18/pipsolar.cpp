@@ -1033,8 +1033,15 @@ void Pipsolar::handle_p006mod_(const char *message) {
     this->last_p006mod_->publish_state(message);
   }
   // ^D005<0><mode_char>  — mode digit is at index 6
-  if (strlen(message) < 7)
+  if (strlen(message) < 7) {
+    // A failed or refused poll passes "". Usually the inverter is off (it powers down at dusk in
+    // standby): clear the mode, as the status sensors clear, rather than keep the last one.
+    if (this->device_mode_id_)
+      this->device_mode_id_->publish_state(NAN);
+    if (this->device_mode_)
+      this->device_mode_->publish_state("");
     return;
+  }
   const char mode_char = message[6];
   const int mode_id = mode_char - '0';
   if (this->device_mode_id_)

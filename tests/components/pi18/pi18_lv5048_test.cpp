@@ -840,6 +840,32 @@ TEST(Pi18Lv5048Test, AnsweredPollIsDecoded) {
   EXPECT_EQ(uart.count_sent("^P006MOD"), 1u);
 }
 
+// An inverter left in standby powers off at dusk and stops answering. Its last mode (often 7,
+// "Unknown mode", sent just before it powers off) must not stay on show all night.
+TEST(Pi18Lv5048Test, UnansweredModePollClearsTheMode) {
+  FakeUart uart;
+  TestablePipsolar inv;
+  inv.set_uart_parent(&uart);
+  inv.set_command_timeout_ms(1);
+  text_sensor::TextSensor mode;
+  sensor::Sensor mode_id;
+  inv.set_device_mode(&mode);
+  inv.set_device_mode_id(&mode_id);
+  inv.loop();  // sends ^P006MOD
+  uart.receive(MOD_REPLY_BATTERY);
+  for (int i = 0; i < 4; i++)
+    inv.loop();
+  ASSERT_STREQ(mode.state.c_str(), "Battery mode");
+
+  inv.update();
+  for (int i = 0; i < 4; i++) {  // the next ^P006MOD times out
+    delay(2);
+    inv.loop();
+  }
+  EXPECT_EQ(mode.state, "");
+  EXPECT_TRUE(std::isnan(mode_id.state));
+}
+
 // An inverter answers a query it doesn't support with ^0. That is a refusal, not
 // data. Like SolarPower, the component tries a refused poll at most 3 times per update.
 TEST(Pi18Lv5048Test, PollAnsweredAfterARefusalIsDecoded) {
@@ -852,7 +878,7 @@ TEST(Pi18Lv5048Test, PollAnsweredAfterARefusalIsDecoded) {
   uart.receive(REFUSED_REPLY);
   for (int i = 0; i < 4; i++)
     inv.loop();
-  EXPECT_FALSE(mode_id.has_state());
+  EXPECT_TRUE(std::isnan(mode_id.state));  // no mode, not one decoded from the ^0
   uart.receive(MOD_REPLY_BATTERY);
   for (int i = 0; i < 4; i++)
     inv.loop();
